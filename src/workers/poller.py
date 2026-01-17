@@ -35,6 +35,8 @@ class WindowState:
     last_update_time: float = 0.0
     new_hand_detected_time: float = 0.0  # Time when new hand was detected
     last_hand_id: Optional[str] = None
+    turn_detected_time: float = 0.0  # Time when turn=true was first detected
+    cards_recognized: bool = False  # True after cards successfully recognized
 
 
 class TurnEventCallback:
@@ -179,11 +181,35 @@ class StatePoller:
         ))
         
         # Recognize hero cards using per-window config
-        # Wait 1 second after new hand before recognizing cards (animation time)
-        time_since_new_hand = time.time() - state.new_hand_detected_time
-        if state.new_hand_detected_time > 0 and time_since_new_hand < 1.0:
+        # Logic: recognize until turn=true + 3 seconds, then stop
+        current_time = time.time()
+        
+        # Track when turn was first detected
+        if turn_result.is_hero_turn and state.turn_detected_time == 0:
+            state.turn_detected_time = current_time
+            logger.debug(f"Turn detected at {current_time}")
+        
+        # Reset on new hand
+        if hand_result.is_new_hand:
+            state.turn_detected_time = 0.0
+            state.cards_recognized = False
+            state.new_hand_detected_time = current_time
+        
+        # Decide whether to recognize cards
+        # Logic: recognize cards until turn=true + 3 seconds, then stop
+        time_since_new_hand = current_time - state.new_hand_detected_time if state.new_hand_detected_time > 0 else 999
+        time_since_turn = current_time - state.turn_detected_time if state.turn_detected_time > 0 else 0
+        
+        # Skip recognition only if:
+        # 1. Too soon after new hand (wait 1 second for animation)
+        # 2. Turn was detected more than 3 seconds ago (decision already made)
+        if time_since_new_hand < 1.0:
             hero_cards = None  # Wait for cards to be dealt
+        elif state.turn_detected_time > 0 and time_since_turn > 3.0:
+            # Use previously recognized cards, stop new recognition to save CPU
+            hero_cards = state.last_observation.hero_cards if state.last_observation else None
         else:
+            # Recognize cards (before turn, during turn, up to 3 sec after turn)
             hero_cards = self._recognize_hero_cards(window_offset, table_config)
         
         # Detect board cards
