@@ -71,7 +71,7 @@ class OverlayConfig:
 @dataclass
 class VisionConfig:
     """Configuration for card recognition."""
-    template_match_threshold: float = 0.4  # For rank matching
+    template_match_threshold: float = 0.3  # For rank matching (lowered for better detection)
     suit_match_threshold: float = 0.0  # For suit matching (0.0 = any match, like legacy)
     ocr_config: str = "--psm 7 -c tessedit_char_whitelist=0123456789,."
     
