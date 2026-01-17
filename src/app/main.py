@@ -11,6 +11,7 @@ from typing import Optional
 
 from .config import get_config, setup_logging, AppConfig
 from ..capture.window_manager import WindowManager, get_window_manager
+from ..capture.window_registry import WindowRegistry, get_window_registry, TableWindow
 from ..overlay.overlay_window import OverlayManager, OverlayWindow
 from ..poker.models import Observation, HeroTurnEvent
 from ..poker.preflop_engine import create_engine, PreflopEngine
@@ -39,6 +40,7 @@ class PlutosApp:
         setup_logging(self.config)
         
         # Components (initialized in start())
+        self._window_registry: Optional[WindowRegistry] = None
         self._window_manager: Optional[WindowManager] = None
         self._overlay_manager: Optional[OverlayManager] = None
         self._poller: Optional[StatePoller] = None
@@ -48,6 +50,9 @@ class PlutosApp:
         
         self._running = False
         self._session_id: Optional[int] = None
+        
+        # Per-window pollers for multi-table support
+        self._window_pollers: dict = {}
     
     def _on_hero_turn(self, event: HeroTurnEvent):
         """
@@ -100,37 +105,61 @@ class PlutosApp:
         """Discover and setup poker windows."""
         logger.info("Discovering poker windows...")
         
+        # Initialize window registry
+        self._window_registry = get_window_registry(
+            max_windows=self.config.max_tables,
+            title_pattern=self.config.window_title_pattern,
+            default_config=self.config.default_table
+        )
+        
+        # Also keep window manager for backward compatibility
         self._window_manager = get_window_manager(
             max_windows=self.config.max_tables,
             title_pattern=self.config.window_title_pattern
         )
         
-        # Auto-discover windows
-        discovered = self._window_manager.auto_discover()
+        # Discover windows
+        discovered = self._window_registry.discover_windows()
         
         if not discovered:
             logger.warning("No poker windows found. Waiting for windows...")
         else:
             logger.info(f"Found {len(discovered)} poker window(s)")
             
-            # Create overlay for each window
-            for window in discovered:
-                x = window.info.client_left + self.config.overlay.offset_x
-                y = window.info.client_top + self.config.overlay.offset_y
-                
-                overlay = self._overlay_manager.create_overlay(
-                    window.window_id, x, y
-                )
-                overlay.show_waiting()
-                
-                # Register in database
-                if self._db and self._session_id:
-                    self._db.register_window(
-                        session_id=self._session_id,
-                        window_id=window.window_id,
-                        title=window.info.title,
-                        hwnd=window.info.hwnd
-                    )
+            # Setup each window
+            for table_window in discovered:
+                self._setup_single_window(table_window)
+    
+    def _setup_single_window(self, table_window: TableWindow):
+        """
+        Setup a single table window with overlay and DB registration.
+        
+        Args:
+            table_window: TableWindow to setup
+        """
+        # Calculate overlay position
+        x = table_window.info.client_left + self.config.overlay.offset_x
+        y = table_window.info.client_top + self.config.overlay.offset_y
+        
+        # Create overlay
+        overlay = self._overlay_manager.create_overlay(
+            table_window.window_id, x, y
+        )
+        overlay.show_waiting()
+        
+        # Register in database
+        if self._db and self._session_id:
+            self._db.register_window(
+                session_id=self._session_id,
+                window_id=table_window.window_id,
+                title=table_window.info.title,
+                hwnd=table_window.info.hwnd
+            )
+        
+        logger.info(
+            f"Setup window {table_window.window_id} at "
+            f"({table_window.info.client_left}, {table_window.info.client_top})"
+        )
     
     def start(self):
         """Start the application."""
@@ -210,25 +239,24 @@ class PlutosApp:
         try:
             while self._running:
                 # Periodic tasks
-                self._window_manager.refresh_all()
-                
-                # Check for new windows
-                newly_discovered = self._window_manager.auto_discover()
-                for window in newly_discovered:
-                    x = window.info.client_left + self.config.overlay.offset_x
-                    y = window.info.client_top + self.config.overlay.offset_y
-                    overlay = self._overlay_manager.create_overlay(
-                        window.window_id, x, y
-                    )
-                    overlay.show_waiting()
-                
-                # Update overlay positions
-                for window in self._window_manager.get_active_windows():
-                    overlay = self._overlay_manager.get_overlay(window.window_id)
-                    if overlay:
-                        x = window.info.client_left + self.config.overlay.offset_x
-                        y = window.info.client_top + self.config.overlay.offset_y
-                        overlay.update_position(x, y)
+                if self._window_registry:
+                    self._window_registry.refresh_all()
+                    
+                    # Check for new windows
+                    newly_discovered = self._window_registry.discover_windows()
+                    for table_window in newly_discovered:
+                        self._setup_single_window(table_window)
+                    
+                    # Update overlay positions
+                    for table_window in self._window_registry.get_active_windows():
+                        overlay = self._overlay_manager.get_overlay(table_window.window_id)
+                        if overlay:
+                            x = table_window.info.client_left + self.config.overlay.offset_x
+                            y = table_window.info.client_top + self.config.overlay.offset_y
+                            overlay.update_position(x, y)
+                    
+                    # Cleanup windows with too many errors
+                    self._window_registry.cleanup_inactive(max_errors=10)
                 
                 time.sleep(1.0)  # Main loop runs at 1 Hz
                 
