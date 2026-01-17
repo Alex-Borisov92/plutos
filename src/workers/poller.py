@@ -37,6 +37,9 @@ class WindowState:
     last_hand_id: Optional[str] = None
     turn_detected_time: float = 0.0  # Time when turn=true was first detected
     cards_recognized: bool = False  # True after cards successfully recognized
+    card_votes: list = None  # List of recognized cards for voting
+    final_cards: object = None  # Final cards after voting
+    final_decision: object = None  # Final decision after voting
 
 
 class TurnEventCallback:
@@ -194,23 +197,45 @@ class StatePoller:
             state.turn_detected_time = 0.0
             state.cards_recognized = False
             state.new_hand_detected_time = current_time
+            state.card_votes = []  # Reset voting
+            state.final_cards = None
+            state.final_decision = None
+        
+        # Initialize card_votes if None
+        if state.card_votes is None:
+            state.card_votes = []
         
         # Decide whether to recognize cards
-        # Logic: recognize cards until turn=true + 3 seconds, then stop
+        # Logic: recognize cards until turn=true + 3 seconds, then use final result
         time_since_new_hand = current_time - state.new_hand_detected_time if state.new_hand_detected_time > 0 else 999
         time_since_turn = current_time - state.turn_detected_time if state.turn_detected_time > 0 else 0
+        recognition_window_closed = state.turn_detected_time > 0 and time_since_turn > 3.0
         
-        # Skip recognition only if:
-        # 1. Too soon after new hand (wait 1 second for animation)
-        # 2. Turn was detected more than 3 seconds ago (decision already made)
         if time_since_new_hand < 1.0:
             hero_cards = None  # Wait for cards to be dealt
-        elif state.turn_detected_time > 0 and time_since_turn > 3.0:
-            # Use previously recognized cards, stop new recognition to save CPU
-            hero_cards = state.last_observation.hero_cards if state.last_observation else None
+        elif recognition_window_closed:
+            # Window closed - use final result from voting
+            hero_cards = state.final_cards
         else:
-            # Recognize cards (before turn, during turn, up to 3 sec after turn)
-            hero_cards = self._recognize_hero_cards(window_offset, table_config)
+            # Recognize cards and accumulate votes
+            recognized = self._recognize_hero_cards(window_offset, table_config)
+            if recognized:
+                state.card_votes.append(recognized)
+            hero_cards = recognized
+        
+        # When recognition window closes, calculate final result
+        if recognition_window_closed and state.final_cards is None and state.card_votes:
+            from collections import Counter
+            # Vote on cards (use string representation for hashing)
+            votes = [str(c) for c in state.card_votes]
+            counter = Counter(votes)
+            most_common, count = counter.most_common(1)[0]
+            # Find the actual HoleCards object
+            for c in state.card_votes:
+                if str(c) == most_common:
+                    state.final_cards = c
+                    break
+            logger.info(f"Final cards by voting ({count}/{len(votes)}): {state.final_cards}")
         
         # Detect board cards
         board_cards = self._recognize_board_cards(window_offset, table_config)
@@ -236,13 +261,35 @@ class StatePoller:
         )
         
         # Get preflop decision using observation
+        # Only show final decision after recognition window closes (voting complete)
         decision = None
-        if hero_cards and self._preflop_engine and stage == Stage.PREFLOP:
-            decision = self._preflop_engine.get_decision(observation)
+        if recognition_window_closed and state.final_cards and self._preflop_engine and stage == Stage.PREFLOP:
+            # Use final cards from voting for decision
+            observation_with_final = Observation(
+                timestamp=observation.timestamp,
+                window_id=observation.window_id,
+                stage=observation.stage,
+                hero_position=observation.hero_position,
+                dealer_seat=observation.dealer_seat,
+                active_players_count=observation.active_players_count,
+                active_positions=observation.active_positions,
+                hero_cards=state.final_cards,
+                board_cards=observation.board_cards,
+                is_hero_turn=observation.is_hero_turn,
+                hero_stack_bb=observation.hero_stack_bb,
+                confidence=observation.confidence,
+            )
+            if state.final_decision is None:
+                state.final_decision = self._preflop_engine.get_decision(observation_with_final)
+                if state.final_decision:
+                    logger.info(f"FINAL DECISION: {state.final_decision.action.value} ({state.final_decision.reasoning})")
+            decision = state.final_decision
         
         # Send debug info (always, after decision is known)
         if self._on_debug:
-            cards_str = str(hero_cards) if hero_cards else None
+            # Show current cards during recognition, final cards after window closes
+            display_cards = state.final_cards if recognition_window_closed else hero_cards
+            cards_str = str(display_cards) if display_cards else None
             decision_str = decision.action.value if decision else None
             self._on_debug(window_id, {
                 "dealer_seat": dealer_result.seat_index,
