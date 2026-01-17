@@ -247,7 +247,7 @@ class StatePoller:
         self,
         window_offset: tuple,
         table_config: Optional[TableConfig] = None,
-        num_samples: int = 5
+        num_samples: int = 7
     ) -> Optional[HoleCards]:
         """
         Recognize hero's hole cards with majority voting.
@@ -306,7 +306,7 @@ class StatePoller:
         counter = Counter(votes)
         most_common, count = counter.most_common(1)[0]
         
-        # Require at least 3 out of 5 votes
+        # Require majority votes (at least 4 out of 7)
         if count < (num_samples // 2 + 1):
             logger.debug(f"Card recognition uncertain: {counter}")
             return None
