@@ -61,8 +61,8 @@ class UIStateDetector:
     def detect_dealer(
         self,
         window_offset: Tuple[int, int],
-        r_min: int = 200,
-        r_max: int = 255
+        r_min: int = 50,
+        r_max: int = 75
     ) -> DealerDetectionResult:
         """
         Find the dealer button by checking pixel colors.

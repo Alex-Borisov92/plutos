@@ -111,16 +111,17 @@ class TableConfig:
     ])
     
     # Dealer button pixel checks (one per seat, 8 max)
-    # These need calibration - check where dealer chip appears for each seat
+    # Calibrated for Pokerdom - window at (-470, -1448)
+    # R channel threshold: 50-70 (gray dealer chip)
     dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
-        PixelCoord(299, 287),   # Seat 0
-        PixelCoord(564, 286),   # Seat 1
-        PixelCoord(807, 470),   # Seat 2
-        PixelCoord(786, 704),   # Seat 3
-        PixelCoord(468, 780),   # Seat 4 (hero seat typically)
-        PixelCoord(166, 785),   # Seat 5
-        PixelCoord(76, 704),    # Seat 6
-        PixelCoord(55, 472),    # Seat 7
+        PixelCoord(1141, 403),   # Seat 0
+        PixelCoord(1603, 407),   # Seat 1
+        PixelCoord(1859, 547),   # Seat 2
+        PixelCoord(1735, 866),   # Seat 3
+        PixelCoord(1406, 948),   # Seat 4 (hero seat)
+        PixelCoord(833, 865),    # Seat 5
+        PixelCoord(709, 547),    # Seat 6
+        PixelCoord(965, 407),    # Seat 7
     ])
     
     # Active player pixel checks (excluding hero seat)
