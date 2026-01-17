@@ -186,25 +186,6 @@ class StatePoller:
         else:
             hero_cards = self._recognize_hero_cards(window_offset, table_config)
         
-        # Get preflop decision after building observation
-        decision = None
-        
-        # Update debug with cards and decision
-        if self._on_debug:
-            cards_str = str(hero_cards) if hero_cards else None
-            decision_str = f"{decision.action.value}" if decision else None
-            self._on_debug(window_id, {
-                "dealer_seat": dealer_result.seat_index,
-                "active_count": active_result.count,
-                "active_seats": active_result.active_seats,
-                "is_turn": turn_result.is_hero_turn,
-                "hero_cards": cards_str,
-                "decision": decision_str,
-                "hand_id": hand_result.hand_id,
-                "is_new_hand": hand_result.is_new_hand,
-                "hero_stack_bb": hero_stack_bb,
-            })
-        
         # Detect board cards
         board_cards = self._recognize_board_cards(window_offset, table_config)
         stage = board_cards.get_stage()
@@ -229,24 +210,25 @@ class StatePoller:
         )
         
         # Get preflop decision using observation
+        decision = None
         if hero_cards and self._preflop_engine and stage == Stage.PREFLOP:
             decision = self._preflop_engine.get_decision(observation)
-            if decision:
-                decision_str = decision.action.value
-                # Update debug with decision
-                if self._on_debug:
-                    cards_str = str(hero_cards) if hero_cards else None
-                    self._on_debug(window_id, {
-                        "dealer_seat": dealer_result.seat_index,
-                        "active_count": active_result.count,
-                        "active_seats": active_result.active_seats,
-                        "is_turn": turn_result.is_hero_turn,
-                        "hero_cards": cards_str,
-                        "decision": decision_str,
-                        "hand_id": hand_result.hand_id,
-                        "is_new_hand": False,  # Not new at this point
-                        "hero_stack_bb": hero_stack_bb,
-                    })
+        
+        # Send debug info (always, after decision is known)
+        if self._on_debug:
+            cards_str = str(hero_cards) if hero_cards else None
+            decision_str = decision.action.value if decision else None
+            self._on_debug(window_id, {
+                "dealer_seat": dealer_result.seat_index,
+                "active_count": active_result.count,
+                "active_seats": active_result.active_seats,
+                "is_turn": turn_result.is_hero_turn,
+                "hero_cards": cards_str,
+                "decision": decision_str,
+                "hand_id": hand_result.hand_id,
+                "is_new_hand": hand_result.is_new_hand,
+                "hero_stack_bb": hero_stack_bb,
+            })
         
         return observation
     
