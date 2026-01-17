@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import logging
 
-from ..app.config import PixelCoord, PixelCheck, TableConfig
+import re
+try:
+    import pytesseract
+    from PIL import Image
+    HAS_OCR = True
+except ImportError:
+    HAS_OCR = False
+
+from ..app.config import PixelCoord, PixelCheck, TableConfig, Region
 from ..capture.screen_capture import ScreenCapture, capture_pixel
 
 
@@ -19,6 +27,14 @@ class DealerDetectionResult:
     seat_index: Optional[int]
     pixel_color: Optional[Tuple[int, int, int]]
     confidence: float
+
+
+@dataclass
+class HandIdResult:
+    """Result of hand ID detection."""
+    hand_id: Optional[str]
+    is_new_hand: bool
+    previous_id: Optional[str]
 
 
 @dataclass
@@ -57,6 +73,7 @@ class UIStateDetector:
         """
         self.config = config
         self._capture = capture or ScreenCapture()
+        self._last_hand_id: Optional[str] = None
     
     def detect_dealer(
         self,
@@ -75,15 +92,18 @@ class UIStateDetector:
         Returns:
             DealerDetectionResult with seat index or None
         """
+        debug_colors = []
         for seat_idx, pixel in enumerate(self.config.dealer_pixels):
             color = self._capture.capture_pixel(
                 pixel.left, pixel.top, window_offset
             )
             
             if color is None:
+                debug_colors.append(f"S{seat_idx}:None")
                 continue
             
             r, g, b = color
+            debug_colors.append(f"S{seat_idx}:({r},{g},{b})")
             
             # Dealer button is gray: R,G,B all in range 50-75 and similar to each other
             is_gray = (r_min <= r <= r_max and 
@@ -92,11 +112,14 @@ class UIStateDetector:
                        abs(r - g) < 15 and abs(g - b) < 15)
             
             if is_gray:
+                logger.debug(f"Dealer found at S{seat_idx}: {color}")
                 return DealerDetectionResult(
                     seat_index=seat_idx,
                     pixel_color=color,
                     confidence=1.0
                 )
+        
+        logger.info(f"Dealer colors: {' '.join(debug_colors)}")
         return DealerDetectionResult(
             seat_index=None,
             pixel_color=None,
@@ -192,6 +215,49 @@ class UIStateDetector:
             pixel_color=color,
             confidence=confidence
         )
+    
+    def detect_hand_id(
+        self,
+        window_offset: Tuple[int, int]
+    ) -> HandIdResult:
+        """
+        Detect hand ID from screen using OCR.
+        Compares with previous ID to detect new hand.
+        
+        Args:
+            window_offset: (x, y) screen offset of window client area
+            
+        Returns:
+            HandIdResult with current hand ID and new hand flag
+        """
+        if not HAS_OCR:
+            return HandIdResult(hand_id=None, is_new_hand=False, previous_id=self._last_hand_id)
+        
+        region = self.config.hand_id_region
+        img = self._capture.capture_region(region, window_offset)
+        
+        if img is None:
+            return HandIdResult(hand_id=None, is_new_hand=False, previous_id=self._last_hand_id)
+        
+        # OCR the region
+        try:
+            text = pytesseract.image_to_string(img, config='--psm 7 -c tessedit_char_whitelist=0123456789')
+            # Extract digits only
+            digits = re.sub(r'\D', '', text)
+            hand_id = digits if digits else None
+        except Exception as e:
+            logger.debug(f"OCR error: {e}")
+            hand_id = None
+        
+        # Check if new hand
+        is_new = hand_id is not None and hand_id != self._last_hand_id and len(hand_id) > 5
+        previous = self._last_hand_id
+        
+        if is_new:
+            logger.info(f"New hand detected: {hand_id} (prev: {previous})")
+            self._last_hand_id = hand_id
+        
+        return HandIdResult(hand_id=hand_id, is_new_hand=is_new, previous_id=previous)
     
     def get_full_state(
         self,

@@ -109,13 +109,27 @@ class PlutosApp:
             window_id: Window ID
             debug_info: Dict with dealer_seat, active_count, is_turn, etc.
         """
-        # Log debug info
+        from ..poker.positions import get_hero_position, get_active_positions
+        
         dealer = debug_info.get("dealer_seat")
         active = debug_info.get("active_count", 0)
         is_turn = debug_info.get("is_turn", False)
         active_seats = debug_info.get("active_seats", [])
         
-        logger.info(f"[{window_id}] D:{dealer} Active:{active} Seats:{active_seats} Turn:{is_turn}")
+        # Calculate hero position (hero is always seat 4)
+        hero_seat = 4
+        hero_pos = None
+        active_positions = []
+        if dealer is not None:
+            hero_pos = get_hero_position(hero_seat, dealer, total_seats=8)
+            active_positions = get_active_positions(active_seats, dealer, total_seats=8)
+        
+        hand_id = debug_info.get("hand_id", "")
+        is_new = debug_info.get("is_new_hand", False)
+        hand_text = f"H:{hand_id[-6:]}" if hand_id and len(hand_id) > 6 else f"H:{hand_id}" if hand_id else "H:?"
+        new_mark = " NEW!" if is_new else ""
+        
+        logger.info(f"[{window_id}] D:{dealer} Active:{active} Seats:{active_seats} Turn:{is_turn} {hand_text}{new_mark}")
         
         overlay = self._overlays.get(window_id)
         if overlay:
@@ -123,7 +137,8 @@ class PlutosApp:
                 dealer_seat=dealer,
                 active_count=active,
                 is_turn=is_turn,
-                cards="-"
+                hero_position=hero_pos,
+                active_positions=active_positions
             )
     
     def _setup_windows(self):

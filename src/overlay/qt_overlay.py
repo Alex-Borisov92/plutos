@@ -107,11 +107,20 @@ class QtOverlayWindow:
         """Update displayed text."""
         self._update_queue.put(text)
     
-    def show_debug(self, dealer_seat, active_count: int, is_turn: bool, cards: str = "-"):
-        """Display debug state."""
-        dealer_text = f"D:{dealer_seat}" if dealer_seat is not None else "D:?"
-        turn_text = "TURN!" if is_turn else "wait"
-        text = f"{dealer_text} | {turn_text}\nActive: {active_count} | {cards}"
+    def show_debug(self, dealer_seat, active_count: int, is_turn: bool, 
+                    hero_position=None, active_positions=None):
+        """Display debug state with position info."""
+        pos_text = hero_position.value if hero_position else "?"
+        turn_text = ">>> YOUR TURN <<<" if is_turn else "waiting..."
+        
+        # Convert positions to short names
+        if active_positions:
+            pos_names = [p.value for p in active_positions]
+            positions_text = " ".join(pos_names)
+        else:
+            positions_text = "-"
+        
+        text = f"{pos_text} | {active_count} players\n{turn_text}\n{positions_text}"
         self.update_text(text)
     
     def show_waiting(self):

@@ -114,14 +114,14 @@ class TableConfig:
     # Calibrated for Pokerdom (+462 offset applied)
     # R channel threshold: 50-70 (gray dealer chip)
     dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
-        PixelCoord(1596, 395),   # Seat 0 (+462)
-        PixelCoord(2056, 404),   # Seat 1 (+462)
-        PixelCoord(2311, 540),   # Seat 2 (+462)
-        PixelCoord(2189, 858),   # Seat 3 (+462)
-        PixelCoord(1860, 940),   # Seat 4 hero (+462)
-        PixelCoord(1292, 858),   # Seat 5 (+462)
-        PixelCoord(1164, 539),   # Seat 6 (+462)
-        PixelCoord(1418, 400),   # Seat 7 (+462)
+        PixelCoord(1130, 396),   # Seat 0 (calibrated)
+        PixelCoord(1594, 401),   # Seat 1 (calibrated)
+        PixelCoord(1852, 540),   # Seat 2 (calibrated)
+        PixelCoord(1724, 859),   # Seat 3 (calibrated)
+        PixelCoord(1397, 940),   # Seat 4 hero (calibrated)
+        PixelCoord(825, 858),    # Seat 5 (calibrated)
+        PixelCoord(701, 539),    # Seat 6 (calibrated)
+        PixelCoord(955, 400),    # Seat 7 (calibrated)
     ])
     
     # Active player pixel checks (excluding hero seat)
@@ -149,6 +149,10 @@ class TableConfig:
     
     # Pot region for OCR (relative to window) (+462 offset)
     pot_region: Region = field(default_factory=lambda: Region(841, 320, 130, 35))
+    
+    # Hand ID region for detecting new hands (top of screen)
+    # Calibrated from (959,-1430) to (1046,-1413)
+    hand_id_region: Region = field(default_factory=lambda: Region(1421, 10, 87, 17))
     
     # Position names for 8-max table (starting from dealer, going clockwise)
     positions: List[str] = field(default_factory=lambda: [

@@ -131,6 +131,9 @@ class StatePoller:
         active_result = ui_state["active_players"]
         turn_result = ui_state["hero_turn"]
         
+        # Detect hand ID for new hand detection
+        hand_result = detector.detect_hand_id(window_offset)
+        
         # Send debug info (always, even when dealer not found)
         if self._on_debug:
             self._on_debug(window_id, {
@@ -140,6 +143,8 @@ class StatePoller:
                 "is_turn": turn_result.is_hero_turn,
                 "turn_color": turn_result.pixel_color,
                 "dealer_color": dealer_result.pixel_color,
+                "hand_id": hand_result.hand_id,
+                "is_new_hand": hand_result.is_new_hand,
             })
         
         # Get dealer seat (required for position calculation)
