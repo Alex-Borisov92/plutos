@@ -89,6 +89,9 @@ class StatePoller:
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         
+        # Per-window UI detectors (to preserve state like last_hand_id)
+        self._ui_detectors: Dict[str, UIStateDetector] = {}
+        
         # Recognition components
         self._capture = ScreenCapture()
         self._recognizer = CardRecognizer()
@@ -121,8 +124,10 @@ class StatePoller:
         else:
             table_config = self.table_config
         
-        # Create UI state detector for this window
-        detector = UIStateDetector(table_config, self._capture)
+        # Get or create UI state detector for this window (preserves state)
+        if window_id not in self._ui_detectors:
+            self._ui_detectors[window_id] = UIStateDetector(table_config, self._capture)
+        detector = self._ui_detectors[window_id]
         
         # Detect UI state
         ui_state = detector.get_full_state(window_offset)

@@ -10,6 +10,8 @@ import re
 try:
     import pytesseract
     from PIL import Image
+    # Set Tesseract path for Windows
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
     HAS_OCR = True
 except ImportError:
     HAS_OCR = False
