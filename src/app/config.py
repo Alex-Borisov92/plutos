@@ -95,11 +95,11 @@ class TableConfig:
     from the top-left of the poker window's client area.
     """
     # Hero cards regions (relative to window client area)
-    # Example values for a ~1000px wide window - CALIBRATE FOR YOUR CLIENT
-    hero_card1_number: Region = field(default_factory=lambda: Region(430, 690, 28, 43))
-    hero_card1_suit: Region = field(default_factory=lambda: Region(431, 732, 17, 24))
-    hero_card2_number: Region = field(default_factory=lambda: Region(462, 690, 28, 43))
-    hero_card2_suit: Region = field(default_factory=lambda: Region(462, 732, 17, 24))
+    # Calibrated for Pokerdom
+    hero_card1_number: Region = field(default_factory=lambda: Region(1176, 995, 36, 45))
+    hero_card1_suit: Region = field(default_factory=lambda: Region(1173, 1054, 39, 36))
+    hero_card2_number: Region = field(default_factory=lambda: Region(1307, 993, 24, 48))
+    hero_card2_suit: Region = field(default_factory=lambda: Region(1292, 1055, 39, 35))
     
     # Board cards regions (5 cards for flop/turn/river)
     board_card_regions: List[Dict] = field(default_factory=lambda: [
@@ -125,26 +125,27 @@ class TableConfig:
     ])
     
     # Active player pixel checks (excluding hero seat)
-    # r_target is the expected red channel value when player is active
+    # Calibrated for Pokerdom - checks avatar/stack area
+    # r_target ~240 (light color when player is active)
     active_player_pixels: List[PixelCheck] = field(default_factory=lambda: [
-        PixelCheck(220, 233, r_target=37),   # Seat 0
-        PixelCheck(710, 231, r_target=40),   # Seat 1
-        PixelCheck(942, 409, r_target=40),   # Seat 2
-        PixelCheck(925, 635, r_target=44),   # Seat 3
+        PixelCheck(1258, 285, r_target=240),   # Seat 0
+        PixelCheck(1722, 346, r_target=240),   # Seat 1
+        PixelCheck(1947, 681, r_target=240),   # Seat 2
+        PixelCheck(1755, 1047, r_target=240),  # Seat 3
         # Seat 4 is hero - no check needed
-        PixelCheck(310, 730, r_target=43),   # Seat 5
-        PixelCheck(-3, 645, r_target=38),    # Seat 6
-        PixelCheck(-18, 403, r_target=42),   # Seat 7
+        PixelCheck(811, 1048, r_target=239),   # Seat 5
+        PixelCheck(555, 681, r_target=240),    # Seat 6
+        PixelCheck(785, 345, r_target=242),    # Seat 7
     ])
     
     # Hero's fixed seat index (0-7)
     hero_seat_index: int = 4
     
     # Turn detection pixel (when hero needs to act)
-    # This should be a pixel that changes color when it's hero's turn
-    # Often the action timer bar or hero card highlight
-    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(450, 750))
-    turn_indicator_color_range: tuple = (200, 255)  # R channel range when active
+    # Calibrated for Pokerdom - green highlight when hero's turn
+    # RGB(108, 201, 128) when active
+    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1097, 1315))
+    turn_indicator_color_range: tuple = (100, 120)  # R channel range when active
     
     # Pot region for OCR (relative to window)
     pot_region: Region = field(default_factory=lambda: Region(379, 320, 130, 35))
