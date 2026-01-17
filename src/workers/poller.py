@@ -202,57 +202,70 @@ class StatePoller:
     def _recognize_hero_cards(
         self,
         window_offset: tuple,
-        table_config: Optional[TableConfig] = None
+        table_config: Optional[TableConfig] = None,
+        num_samples: int = 5
     ) -> Optional[HoleCards]:
         """
-        Recognize hero's hole cards.
+        Recognize hero's hole cards with majority voting.
         
         Args:
             window_offset: Window screen offset
             table_config: Table configuration with card regions
+            num_samples: Number of samples for majority voting
         
         Returns:
             HoleCards or None if recognition failed
         """
+        from collections import Counter
+        import time
+        
         config = table_config or self.table_config
+        votes = []
         
-        # Capture card images
-        card1_rank_img = capture_region(
-            config.hero_card1_number, window_offset
-        )
-        card1_suit_img = capture_region(
-            config.hero_card1_suit, window_offset
-        )
-        card2_rank_img = capture_region(
-            config.hero_card2_number, window_offset
-        )
-        card2_suit_img = capture_region(
-            config.hero_card2_suit, window_offset
-        )
-        
-        # Check all images captured
-        if not all([card1_rank_img, card1_suit_img, card2_rank_img, card2_suit_img]):
-            logger.debug("Failed to capture all card regions")
-            return None
-        
-        # Recognize cards
-        result1 = self._recognizer.recognize_card(card1_rank_img, card1_suit_img)
-        result2 = self._recognizer.recognize_card(card2_rank_img, card2_suit_img)
-        
-        if not result1.is_valid or not result2.is_valid:
-            logger.debug(
-                f"Card recognition failed: "
-                f"card1={result1.raw_rank}{result1.raw_suit} "
-                f"card2={result2.raw_rank}{result2.raw_suit}"
+        for _ in range(num_samples):
+            # Capture card images
+            card1_rank_img = capture_region(
+                config.hero_card1_number, window_offset
             )
+            card1_suit_img = capture_region(
+                config.hero_card1_suit, window_offset
+            )
+            card2_rank_img = capture_region(
+                config.hero_card2_number, window_offset
+            )
+            card2_suit_img = capture_region(
+                config.hero_card2_suit, window_offset
+            )
+            
+            # Check all images captured
+            if not all([card1_rank_img, card1_suit_img, card2_rank_img, card2_suit_img]):
+                continue
+            
+            # Recognize cards
+            result1 = self._recognizer.recognize_card(card1_rank_img, card1_suit_img)
+            result2 = self._recognizer.recognize_card(card2_rank_img, card2_suit_img)
+            
+            if result1.is_valid and result2.is_valid and result1.card != result2.card:
+                # Sort cards by string representation for consistent voting key
+                cards = tuple(sorted([result1.card, result2.card], key=str))
+                votes.append(cards)
+            
+            time.sleep(0.02)  # Small delay between samples
+        
+        if not votes:
+            logger.debug("Card recognition failed: no valid samples")
             return None
         
-        # Check for duplicates
-        if result1.card == result2.card:
-            logger.warning(f"Duplicate cards detected: {result1.card}")
+        # Majority voting
+        counter = Counter(votes)
+        most_common, count = counter.most_common(1)[0]
+        
+        # Require at least 3 out of 5 votes
+        if count < (num_samples // 2 + 1):
+            logger.debug(f"Card recognition uncertain: {counter}")
             return None
         
-        return HoleCards(card1=result1.card, card2=result2.card)
+        return HoleCards(card1=most_common[0], card2=most_common[1])
     
     def _recognize_board_cards(
         self,
