@@ -183,9 +183,8 @@ class UIStateDetector:
             )
         
         r, g, b = color
-        r_min, r_max = self.config.turn_indicator_color_range
-        
-        is_turn = r_min <= r <= r_max
+        # Turn indicator is green - check G channel > 150 and G > R
+        is_turn = g > 150 and g > r
         confidence = 1.0 if is_turn else 0.0
         
         return TurnDetectionResult(

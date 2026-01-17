@@ -144,7 +144,7 @@ class TableConfig:
     # Turn detection pixel (when hero needs to act)
     # Calibrated for Pokerdom - green highlight when hero's turn
     # RGB(113, 205, 134) when active
-    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(982, 1297))
+    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(982, 1359))
     turn_indicator_color_range: tuple = (100, 130)  # R channel range when active
     
     # Pot region for OCR (relative to window) (+462 offset)
