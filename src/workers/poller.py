@@ -33,6 +33,8 @@ class WindowState:
     last_turn_state: bool = False
     consecutive_turn_signals: int = 0
     last_update_time: float = 0.0
+    new_hand_detected_time: float = 0.0  # Time when new hand was detected
+    last_hand_id: Optional[str] = None
 
 
 class TurnEventCallback:
@@ -139,6 +141,13 @@ class StatePoller:
         # Detect hand ID for new hand detection
         hand_result = detector.detect_hand_id(window_offset)
         
+        # Track new hand timing for card recognition delay
+        import time
+        state = self._get_or_create_state(window_id)
+        if hand_result.is_new_hand:
+            state.new_hand_detected_time = time.time()
+            state.last_hand_id = hand_result.hand_id
+        
         # Send debug info (always, even when dealer not found)
         if self._on_debug:
             self._on_debug(window_id, {
@@ -173,7 +182,12 @@ class StatePoller:
         ))
         
         # Recognize hero cards using per-window config
-        hero_cards = self._recognize_hero_cards(window_offset, table_config)
+        # Wait 1 second after new hand before recognizing cards (animation time)
+        time_since_new_hand = time.time() - state.new_hand_detected_time
+        if state.new_hand_detected_time > 0 and time_since_new_hand < 1.0:
+            hero_cards = None  # Wait for cards to be dealt
+        else:
+            hero_cards = self._recognize_hero_cards(window_offset, table_config)
         
         # Detect board cards
         board_cards = self._recognize_board_cards(window_offset, table_config)
