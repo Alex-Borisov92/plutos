@@ -131,10 +131,12 @@ class PlutosApp:
         
         hero_cards = debug_info.get("hero_cards", "")
         decision = debug_info.get("decision", "")
+        hero_stack = debug_info.get("hero_stack_bb")
         cards_text = f"[{hero_cards}]" if hero_cards else ""
         decision_text = f" -> {decision}" if decision else ""
+        stack_text = f" S:{hero_stack:.1f}BB" if hero_stack else ""
         
-        logger.info(f"[{window_id}] D:{dealer} Active:{active} Turn:{is_turn} {hand_text}{new_mark} {cards_text}{decision_text}")
+        logger.info(f"[{window_id}] D:{dealer} Active:{active} Turn:{is_turn} {hand_text}{new_mark} {cards_text}{decision_text}{stack_text}")
         
         overlay = self._overlays.get(window_id)
         if overlay:
@@ -145,7 +147,8 @@ class PlutosApp:
                 hero_position=hero_pos,
                 active_positions=active_positions,
                 decision=decision,
-                cards=hero_cards
+                cards=hero_cards,
+                stack_bb=hero_stack
             )
     
     def _setup_windows(self):

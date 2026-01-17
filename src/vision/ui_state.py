@@ -55,6 +55,14 @@ class TurnDetectionResult:
     confidence: float
 
 
+@dataclass
+class HeroStackResult:
+    """Result of hero stack detection."""
+    stack_bb: Optional[float]
+    raw_text: Optional[str]
+    confidence: float
+
+
 class UIStateDetector:
     """
     Detects UI state by checking pixel colors at specific positions.
@@ -260,6 +268,62 @@ class UIStateDetector:
             self._last_hand_id = hand_id
         
         return HandIdResult(hand_id=hand_id, is_new_hand=is_new, previous_id=previous)
+    
+    def detect_hero_stack(
+        self,
+        window_offset: Tuple[int, int]
+    ) -> HeroStackResult:
+        """
+        Detect hero's stack size using OCR.
+        Format expected: "XX,XX BB" or "XX.XX BB"
+        
+        Args:
+            window_offset: (x, y) screen offset of window client area
+            
+        Returns:
+            HeroStackResult with stack in BB
+        """
+        if not HAS_OCR:
+            return HeroStackResult(stack_bb=None, raw_text=None, confidence=0.0)
+        
+        region = self.config.hero_stack_region
+        img = self._capture.capture_region(region, window_offset)
+        
+        if img is None:
+            return HeroStackResult(stack_bb=None, raw_text=None, confidence=0.0)
+        
+        # OCR the region
+        try:
+            # Allow digits, comma, period, space, B
+            text = pytesseract.image_to_string(
+                img, 
+                config='--psm 7 -c tessedit_char_whitelist=0123456789,. BB'
+            ).strip()
+            
+            if not text:
+                return HeroStackResult(stack_bb=None, raw_text=None, confidence=0.0)
+            
+            # Parse the number - format is "50,04 BB" or "50.04 BB"
+            # Remove "BB" suffix and whitespace
+            number_str = re.sub(r'[Bb\s]+$', '', text)
+            # Replace comma with dot for float parsing
+            number_str = number_str.replace(',', '.')
+            # Extract the number
+            match = re.search(r'(\d+\.?\d*)', number_str)
+            
+            if match:
+                stack_bb = float(match.group(1))
+                return HeroStackResult(
+                    stack_bb=stack_bb,
+                    raw_text=text,
+                    confidence=1.0
+                )
+            
+            return HeroStackResult(stack_bb=None, raw_text=text, confidence=0.0)
+            
+        except Exception as e:
+            logger.debug(f"Stack OCR error: {e}")
+            return HeroStackResult(stack_bb=None, raw_text=None, confidence=0.0)
     
     def get_full_state(
         self,

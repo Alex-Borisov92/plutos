@@ -212,6 +212,7 @@ class Observation:
     
     # Optional additional info
     pot_bb: Optional[float] = None
+    hero_stack_bb: Optional[float] = None
     is_hero_turn: bool = False
     
     # Raw recognition confidence for debugging

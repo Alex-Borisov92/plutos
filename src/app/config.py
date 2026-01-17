@@ -154,6 +154,10 @@ class TableConfig:
     # Calibrated from (959,-1430) to (1046,-1413)
     hand_id_region: Region = field(default_factory=lambda: Region(1421, 10, 87, 17))
     
+    # Hero stack region for OCR (displays "XX,XX BB")
+    # Calibrated from (749,-254) to (877,-225) -> relative (1211, 1186)
+    hero_stack_region: Region = field(default_factory=lambda: Region(1211, 1186, 140, 35))
+    
     # Position names for 8-max table (starting from dealer, going clockwise)
     positions: List[str] = field(default_factory=lambda: [
         "BTN", "SB", "BB", "UTG", "UTG+1", "MP", "HJ", "CO"

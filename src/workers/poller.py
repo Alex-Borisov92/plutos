@@ -145,6 +145,10 @@ class StatePoller:
         # Detect hand ID for new hand detection
         hand_result = detector.detect_hand_id(window_offset)
         
+        # Detect hero stack
+        stack_result = detector.detect_hero_stack(window_offset)
+        hero_stack_bb = stack_result.stack_bb
+        
         # Track new hand timing for card recognition delay
         import time
         state = self._get_or_create_state(window_id)
@@ -198,6 +202,7 @@ class StatePoller:
                 "decision": decision_str,
                 "hand_id": hand_result.hand_id,
                 "is_new_hand": hand_result.is_new_hand,
+                "hero_stack_bb": hero_stack_bb,
             })
         
         # Detect board cards
@@ -216,6 +221,7 @@ class StatePoller:
             hero_cards=hero_cards,
             board_cards=board_cards,
             is_hero_turn=turn_result.is_hero_turn,
+            hero_stack_bb=hero_stack_bb,
             confidence={
                 "dealer": dealer_result.confidence,
                 "turn": turn_result.confidence,
@@ -239,6 +245,7 @@ class StatePoller:
                         "decision": decision_str,
                         "hand_id": hand_result.hand_id,
                         "is_new_hand": False,  # Not new at this point
+                        "hero_stack_bb": hero_stack_bb,
                     })
         
         return observation

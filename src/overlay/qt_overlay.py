@@ -109,10 +109,11 @@ class QtOverlayWindow:
     
     def show_debug(self, dealer_seat, active_count: int, is_turn: bool, 
                     hero_position=None, active_positions=None, 
-                    decision: str = None, cards: str = None):
-        """Display debug state with position info and decision."""
+                    decision: str = None, cards: str = None, stack_bb: float = None):
+        """Display debug state with position info, decision, and stack."""
         pos_text = hero_position.value if hero_position else "?"
         cards_text = cards if cards else "-"
+        stack_text = f"{stack_bb:.1f}BB" if stack_bb else "-"
         
         # Show decision instead of "YOUR TURN"
         if decision:
@@ -129,7 +130,7 @@ class QtOverlayWindow:
         else:
             positions_text = "-"
         
-        text = f"{pos_text} | {active_count}p | {cards_text}\n{action_text}\n{positions_text}"
+        text = f"{pos_text} | {active_count}p | {stack_text}\n{cards_text} | {action_text}\n{positions_text}"
         self.update_text(text)
     
     def show_waiting(self):
