@@ -133,9 +133,9 @@ class StatePoller:
         # Recognize hero cards
         hero_cards = self._recognize_hero_cards(window_offset)
         
-        # For now, assume preflop (board detection not implemented in this iteration)
-        board_cards = BoardCards.empty()
-        stage = Stage.PREFLOP
+        # Detect board cards
+        board_cards = self._recognize_board_cards(window_offset)
+        stage = board_cards.get_stage()
         
         # Build observation
         observation = Observation(
@@ -204,6 +204,58 @@ class StatePoller:
             return None
         
         return HoleCards(card1=result1.card, card2=result2.card)
+    
+    def _recognize_board_cards(self, window_offset: tuple) -> BoardCards:
+        """
+        Recognize board cards (flop/turn/river).
+        
+        Args:
+            window_offset: Window screen offset
+        
+        Returns:
+            BoardCards (empty if preflop or recognition failed)
+        """
+        cards = []
+        
+        for region_dict in self.table_config.board_card_regions:
+            if not isinstance(region_dict, dict):
+                continue
+            
+            number_region = region_dict.get('number')
+            suit_region = region_dict.get('suit')
+            
+            if not number_region or not suit_region:
+                continue
+            
+            # Capture images
+            rank_img = capture_region(number_region, window_offset)
+            suit_img = capture_region(suit_region, window_offset)
+            
+            if not rank_img or not suit_img:
+                # No more cards on board
+                break
+            
+            # Recognize card
+            result = self._recognizer.recognize_card(rank_img, suit_img)
+            
+            if not result.is_valid:
+                # Card not recognizable - likely no card there
+                break
+            
+            # Check for duplicates
+            if any(str(c) == str(result.card) for c in cards):
+                logger.warning(f"Duplicate board card detected: {result.card}")
+                continue
+            
+            cards.append(result.card)
+        
+        # Validate board card count (must be 0, 3, 4, or 5)
+        valid_counts = (0, 3, 4, 5)
+        if len(cards) not in valid_counts:
+            logger.debug(f"Invalid board card count: {len(cards)}, using empty board")
+            return BoardCards.empty()
+        
+        return BoardCards(cards=tuple(cards))
     
     def _handle_observation(self, observation: Observation, state: WindowState):
         """

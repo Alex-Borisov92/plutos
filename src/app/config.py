@@ -86,33 +86,69 @@ class TableConfig:
     
     All coordinates are RELATIVE to the window client area origin (0,0).
     This allows the same config to work regardless of window position on screen.
+    
+    NOTE: You need to calibrate these values for your specific poker client.
+    Use the calibration tool (coming soon) or manually measure pixel positions.
+    
+    The original script used negative screen coordinates, which were tied to
+    a specific monitor setup. These relative coords should be positive offsets
+    from the top-left of the poker window's client area.
     """
-    # Hero cards regions (relative to window)
-    hero_card1_number: Region = field(default_factory=lambda: Region(60, 700, 28, 43))
-    hero_card1_suit: Region = field(default_factory=lambda: Region(61, 742, 17, 24))
-    hero_card2_number: Region = field(default_factory=lambda: Region(92, 700, 28, 43))
-    hero_card2_suit: Region = field(default_factory=lambda: Region(92, 742, 17, 24))
+    # Hero cards regions (relative to window client area)
+    # Example values for a ~1000px wide window - CALIBRATE FOR YOUR CLIENT
+    hero_card1_number: Region = field(default_factory=lambda: Region(430, 690, 28, 43))
+    hero_card1_suit: Region = field(default_factory=lambda: Region(431, 732, 17, 24))
+    hero_card2_number: Region = field(default_factory=lambda: Region(462, 690, 28, 43))
+    hero_card2_suit: Region = field(default_factory=lambda: Region(462, 732, 17, 24))
     
     # Board cards regions (5 cards for flop/turn/river)
-    board_card_regions: List[Dict] = field(default_factory=list)
+    board_card_regions: List[Dict] = field(default_factory=lambda: [
+        {"number": Region(228, 454, 30, 44), "suit": Region(228, 495, 17, 24)},  # Card 1
+        {"number": Region(313, 454, 30, 44), "suit": Region(313, 495, 17, 24)},  # Card 2
+        {"number": Region(401, 454, 30, 44), "suit": Region(399, 495, 17, 24)},  # Card 3
+        {"number": Region(485, 454, 30, 44), "suit": Region(485, 495, 17, 24)},  # Card 4
+        {"number": Region(571, 454, 30, 44), "suit": Region(571, 495, 17, 24)},  # Card 5
+    ])
     
     # Dealer button pixel checks (one per seat, 8 max)
-    dealer_pixels: List[PixelCoord] = field(default_factory=list)
+    # These need calibration - check where dealer chip appears for each seat
+    dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
+        PixelCoord(299, 287),   # Seat 0
+        PixelCoord(564, 286),   # Seat 1
+        PixelCoord(807, 470),   # Seat 2
+        PixelCoord(786, 704),   # Seat 3
+        PixelCoord(468, 780),   # Seat 4 (hero seat typically)
+        PixelCoord(166, 785),   # Seat 5
+        PixelCoord(76, 704),    # Seat 6
+        PixelCoord(55, 472),    # Seat 7
+    ])
     
     # Active player pixel checks (excluding hero seat)
-    active_player_pixels: List[PixelCheck] = field(default_factory=list)
+    # r_target is the expected red channel value when player is active
+    active_player_pixels: List[PixelCheck] = field(default_factory=lambda: [
+        PixelCheck(220, 233, r_target=37),   # Seat 0
+        PixelCheck(710, 231, r_target=40),   # Seat 1
+        PixelCheck(942, 409, r_target=40),   # Seat 2
+        PixelCheck(925, 635, r_target=44),   # Seat 3
+        # Seat 4 is hero - no check needed
+        PixelCheck(310, 730, r_target=43),   # Seat 5
+        PixelCheck(-3, 645, r_target=38),    # Seat 6
+        PixelCheck(-18, 403, r_target=42),   # Seat 7
+    ])
     
     # Hero's fixed seat index (0-7)
     hero_seat_index: int = 4
     
     # Turn detection pixel (when hero needs to act)
-    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(100, 750))
-    turn_indicator_color_range: tuple = (200, 255)  # R channel range
+    # This should be a pixel that changes color when it's hero's turn
+    # Often the action timer bar or hero card highlight
+    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(450, 750))
+    turn_indicator_color_range: tuple = (200, 255)  # R channel range when active
     
-    # Pot region for OCR
-    pot_region: Region = field(default_factory=lambda: Region(400, 300, 130, 35))
+    # Pot region for OCR (relative to window)
+    pot_region: Region = field(default_factory=lambda: Region(379, 320, 130, 35))
     
-    # Position names for 8-max table
+    # Position names for 8-max table (starting from dealer, going clockwise)
     positions: List[str] = field(default_factory=lambda: [
         "BTN", "SB", "BB", "UTG", "UTG+1", "MP", "HJ", "CO"
     ])

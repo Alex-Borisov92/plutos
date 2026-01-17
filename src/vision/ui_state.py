@@ -119,7 +119,17 @@ class UIStateDetector:
         active_seats = []
         seat_colors = {}
         
-        for check in self.config.active_player_pixels:
+        # Build seat index mapping - active_player_pixels excludes hero seat
+        # So we need to map list index to actual seat index
+        all_seats = list(range(8))
+        check_seats = [s for s in all_seats if s != self.config.hero_seat_index]
+        
+        for list_idx, check in enumerate(self.config.active_player_pixels):
+            if list_idx >= len(check_seats):
+                break
+                
+            seat_idx = check_seats[list_idx]
+            
             color = self._capture.capture_pixel(
                 check.left, check.top, window_offset
             )
@@ -131,8 +141,6 @@ class UIStateDetector:
             
             # Check if red channel matches expected value within tolerance
             if abs(r - check.r_target) <= tolerance:
-                # Determine seat index from position in list
-                seat_idx = self.config.active_player_pixels.index(check)
                 active_seats.append(seat_idx)
                 seat_colors[seat_idx] = color
                 logger.debug(f"Active player at seat {seat_idx}, color=RGB({r},{g},{b})")
