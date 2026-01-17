@@ -11,7 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from ..app.config import PollerConfig, TableConfig, Region
-from ..capture.screen_capture import ScreenCapture, capture_region
+from ..capture.screen_capture import ScreenCapture, capture_region, capture_pixel
 from ..capture.window_manager import WindowManager, RegisteredWindow
 from ..capture.window_registry import WindowRegistry, TableWindow
 from ..vision.card_recognition import CardRecognizer, build_hole_cards, build_board_cards
@@ -329,34 +329,51 @@ class StatePoller:
         votes = []
         
         for _ in range(num_samples):
-            # Capture card images
+            # Capture rank images
             card1_rank_img = capture_region(
                 config.hero_card1_number, window_offset
-            )
-            card1_suit_img = capture_region(
-                config.hero_card1_suit, window_offset
             )
             card2_rank_img = capture_region(
                 config.hero_card2_number, window_offset
             )
-            card2_suit_img = capture_region(
-                config.hero_card2_suit, window_offset
-            )
             
-            # Check all images captured
-            if not all([card1_rank_img, card1_suit_img, card2_rank_img, card2_suit_img]):
+            # Check rank images captured
+            if not all([card1_rank_img, card2_rank_img]):
                 continue
             
-            # Recognize cards
-            result1 = self._recognizer.recognize_card(card1_rank_img, card1_suit_img)
-            result2 = self._recognizer.recognize_card(card2_rank_img, card2_suit_img)
+            # Recognize ranks using template matching
+            rank1, rank1_conf = self._recognizer.recognize_rank(card1_rank_img)
+            rank2, rank2_conf = self._recognizer.recognize_rank(card2_rank_img)
             
-            # Debug: logger.debug(f"Card sample: r1={result1.card} r2={result2.card}")
+            if not rank1 or not rank2:
+                continue
             
-            if result1.is_valid and result2.is_valid and result1.card != result2.card:
-                # Sort cards by string representation for consistent voting key
-                cards = tuple(sorted([result1.card, result2.card], key=str))
-                votes.append(cards)
+            # Recognize suits using color detection (faster and more reliable)
+            suit1_pixel = config.hero_card1_suit_pixel
+            suit2_pixel = config.hero_card2_suit_pixel
+            
+            color1 = capture_pixel(suit1_pixel.left, suit1_pixel.top, window_offset)
+            color2 = capture_pixel(suit2_pixel.left, suit2_pixel.top, window_offset)
+            
+            if not color1 or not color2:
+                continue
+            
+            suit1, _ = self._recognizer.recognize_suit_by_color(color1)
+            suit2, _ = self._recognizer.recognize_suit_by_color(color2)
+            
+            # Build cards
+            try:
+                from ..poker.models import Card
+                card1 = Card(rank=rank1, suit=suit1)
+                card2 = Card(rank=rank2, suit=suit2)
+                
+                if card1 != card2:
+                    # Sort cards by string representation for consistent voting key
+                    cards = tuple(sorted([card1, card2], key=str))
+                    votes.append(cards)
+            except Exception as e:
+                logger.debug(f"Card creation failed: {e}")
+                continue
             
             time.sleep(0.02)  # Small delay between samples
         

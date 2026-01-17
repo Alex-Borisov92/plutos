@@ -221,6 +221,41 @@ class CardRecognizer:
             self.config.suit_match_threshold
         )
     
+    @staticmethod
+    def recognize_suit_by_color(rgb: Tuple[int, int, int]) -> Tuple[str, float]:
+        """
+        Recognize card suit by pixel color.
+        Much faster and more reliable than template matching.
+        
+        Colors:
+        - Hearts (red): R > 150
+        - Clubs (green): G > 100 and G > R and G > B
+        - Diamonds (blue): B > 80 and B > R
+        - Spades (black): everything else
+        
+        Args:
+            rgb: (R, G, B) tuple
+        
+        Returns:
+            (suit, confidence) - suit is 'h', 'c', 'd', or 's'
+        """
+        r, g, b = rgb
+        
+        # Hearts - red
+        if r > 150 and r > g and r > b:
+            return 'h', 1.0
+        
+        # Clubs - green
+        if g > 100 and g > r and g > b:
+            return 'c', 1.0
+        
+        # Diamonds - blue
+        if b > 80 and b > r:
+            return 'd', 1.0
+        
+        # Spades - dark/black (all channels similar and low)
+        return 's', 1.0
+    
     def recognize_card(
         self,
         rank_image: Image.Image,

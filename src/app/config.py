@@ -101,6 +101,11 @@ class TableConfig:
     hero_card2_number: Region = field(default_factory=lambda: Region(1289, 988, 36, 47))
     hero_card2_suit: Region = field(default_factory=lambda: Region(1287, 1046, 36, 38))
     
+    # Hero cards suit pixel for color-based detection (faster and more reliable)
+    # Calibrated: left card X=715, right card X=848, Y=-370 -> relative (+462, +1440)
+    hero_card1_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1177, 1066))
+    hero_card2_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1310, 1070))
+    
     # Board cards regions (5 cards for flop/turn/river) (+462 offset applied)
     board_card_regions: List[Dict] = field(default_factory=lambda: [
         {"number": Region(690, 454, 30, 44), "suit": Region(690, 495, 17, 24)},  # Card 1
