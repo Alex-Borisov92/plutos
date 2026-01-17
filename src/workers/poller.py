@@ -98,6 +98,10 @@ class StatePoller:
         self._capture = ScreenCapture()
         self._recognizer = CardRecognizer()
         
+        # Preflop decision engine
+        from ..poker.preflop_engine import PlaceholderPreflopEngine
+        self._preflop_engine = PlaceholderPreflopEngine()
+        
         # Debounce settings
         self._debounce_signals = 1  # Number of consecutive signals needed (instant)
     
@@ -148,18 +152,7 @@ class StatePoller:
             state.new_hand_detected_time = time.time()
             state.last_hand_id = hand_result.hand_id
         
-        # Send debug info (always, even when dealer not found)
-        if self._on_debug:
-            self._on_debug(window_id, {
-                "dealer_seat": dealer_result.seat_index,
-                "active_count": active_result.count,
-                "active_seats": active_result.active_seats,
-                "is_turn": turn_result.is_hero_turn,
-                "turn_color": turn_result.pixel_color,
-                "dealer_color": dealer_result.pixel_color,
-                "hand_id": hand_result.hand_id,
-                "is_new_hand": hand_result.is_new_hand,
-            })
+        # Debug info will be sent after card recognition (below)
         
         # Get dealer seat (required for position calculation)
         if dealer_result.seat_index is None:
@@ -189,6 +182,24 @@ class StatePoller:
         else:
             hero_cards = self._recognize_hero_cards(window_offset, table_config)
         
+        # Get preflop decision after building observation
+        decision = None
+        
+        # Update debug with cards and decision
+        if self._on_debug:
+            cards_str = str(hero_cards) if hero_cards else None
+            decision_str = f"{decision.action.value}" if decision else None
+            self._on_debug(window_id, {
+                "dealer_seat": dealer_result.seat_index,
+                "active_count": active_result.count,
+                "active_seats": active_result.active_seats,
+                "is_turn": turn_result.is_hero_turn,
+                "hero_cards": cards_str,
+                "decision": decision_str,
+                "hand_id": hand_result.hand_id,
+                "is_new_hand": hand_result.is_new_hand,
+            })
+        
         # Detect board cards
         board_cards = self._recognize_board_cards(window_offset, table_config)
         stage = board_cards.get_stage()
@@ -210,6 +221,25 @@ class StatePoller:
                 "turn": turn_result.confidence,
             }
         )
+        
+        # Get preflop decision using observation
+        if hero_cards and self._preflop_engine and stage == Stage.PREFLOP:
+            decision = self._preflop_engine.get_decision(observation)
+            if decision:
+                decision_str = decision.action.value
+                # Update debug with decision
+                if self._on_debug:
+                    cards_str = str(hero_cards) if hero_cards else None
+                    self._on_debug(window_id, {
+                        "dealer_seat": dealer_result.seat_index,
+                        "active_count": active_result.count,
+                        "active_seats": active_result.active_seats,
+                        "is_turn": turn_result.is_hero_turn,
+                        "hero_cards": cards_str,
+                        "decision": decision_str,
+                        "hand_id": hand_result.hand_id,
+                        "is_new_hand": False,  # Not new at this point
+                    })
         
         return observation
     
@@ -259,6 +289,8 @@ class StatePoller:
             result1 = self._recognizer.recognize_card(card1_rank_img, card1_suit_img)
             result2 = self._recognizer.recognize_card(card2_rank_img, card2_suit_img)
             
+            # Debug: logger.debug(f"Card sample: r1={result1.card} r2={result2.card}")
+            
             if result1.is_valid and result2.is_valid and result1.card != result2.card:
                 # Sort cards by string representation for consistent voting key
                 cards = tuple(sorted([result1.card, result2.card], key=str))
@@ -267,7 +299,7 @@ class StatePoller:
             time.sleep(0.02)  # Small delay between samples
         
         if not votes:
-            logger.debug("Card recognition failed: no valid samples")
+            logger.debug("Card recognition failed: no valid samples out of %d", num_samples)
             return None
         
         # Majority voting

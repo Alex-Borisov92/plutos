@@ -55,7 +55,7 @@ class QtOverlayWindow:
         # Create label
         layout = QVBoxLayout()
         self._label = QLabel(self._text)
-        self._label.setFont(QFont("Consolas", 14, QFont.Bold))
+        self._label.setFont(QFont("Consolas", 11, QFont.Bold))
         self._label.setStyleSheet("color: #FFFF00; padding: 10px;")
         self._label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._label)
@@ -108,10 +108,19 @@ class QtOverlayWindow:
         self._update_queue.put(text)
     
     def show_debug(self, dealer_seat, active_count: int, is_turn: bool, 
-                    hero_position=None, active_positions=None):
-        """Display debug state with position info."""
+                    hero_position=None, active_positions=None, 
+                    decision: str = None, cards: str = None):
+        """Display debug state with position info and decision."""
         pos_text = hero_position.value if hero_position else "?"
-        turn_text = ">>> YOUR TURN <<<" if is_turn else "waiting..."
+        cards_text = cards if cards else "-"
+        
+        # Show decision instead of "YOUR TURN"
+        if decision:
+            action_text = decision
+        elif is_turn:
+            action_text = "WAITING..."
+        else:
+            action_text = "..."
         
         # Convert positions to short names
         if active_positions:
@@ -120,7 +129,7 @@ class QtOverlayWindow:
         else:
             positions_text = "-"
         
-        text = f"{pos_text} | {active_count} players\n{turn_text}\n{positions_text}"
+        text = f"{pos_text} | {active_count}p | {cards_text}\n{action_text}\n{positions_text}"
         self.update_text(text)
     
     def show_waiting(self):

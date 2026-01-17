@@ -57,11 +57,11 @@ class PollerConfig:
 @dataclass
 class OverlayConfig:
     """Configuration for the overlay window."""
-    offset_x: int = 10  # Offset from window left edge
-    offset_y: int = 10  # Offset from window top edge
-    width: int = 280
-    height: int = 120
-    font_size: int = 12
+    offset_x: int = 897  # Offset from window left edge (calibrated)
+    offset_y: int = 1029  # Offset from window top edge (calibrated)
+    width: int = 224  # 80% of 280
+    height: int = 96  # 80% of 120
+    font_size: int = 10  # 80% of 12
     background_alpha: float = 0.95
     text_color: str = "#00FF00"  # Bright green for visibility
     background_color: str = "#000000"  # Pure black

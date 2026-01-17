@@ -129,7 +129,12 @@ class PlutosApp:
         hand_text = f"H:{hand_id[-6:]}" if hand_id and len(hand_id) > 6 else f"H:{hand_id}" if hand_id else "H:?"
         new_mark = " NEW!" if is_new else ""
         
-        logger.info(f"[{window_id}] D:{dealer} Active:{active} Seats:{active_seats} Turn:{is_turn} {hand_text}{new_mark}")
+        hero_cards = debug_info.get("hero_cards", "")
+        decision = debug_info.get("decision", "")
+        cards_text = f"[{hero_cards}]" if hero_cards else ""
+        decision_text = f" -> {decision}" if decision else ""
+        
+        logger.info(f"[{window_id}] D:{dealer} Active:{active} Turn:{is_turn} {hand_text}{new_mark} {cards_text}{decision_text}")
         
         overlay = self._overlays.get(window_id)
         if overlay:
@@ -138,7 +143,9 @@ class PlutosApp:
                 active_count=active,
                 is_turn=is_turn,
                 hero_position=hero_pos,
-                active_positions=active_positions
+                active_positions=active_positions,
+                decision=decision,
+                cards=hero_cards
             )
     
     def _setup_windows(self):
