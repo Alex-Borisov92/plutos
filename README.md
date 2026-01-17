@@ -95,23 +95,38 @@ plutos/
 
 ### Initial Setup Commands
 
+Repository is already initialized. To connect to your private remote:
+
 ```bash
-# Initialize repository
-git init
+# Add your private remote (GitHub or GitLab)
+git remote add origin git@github.com:YOUR_USERNAME/plutos.git
 
-# Initial commit
-git add .
-git commit -m "Initial project structure"
+# Or with HTTPS:
+# git remote add origin https://github.com/YOUR_USERNAME/plutos.git
 
-# Create develop branch
-git checkout -b develop
-
-# Add remote (replace with your private repo URL)
-git remote add origin <your-private-repo-url>
-
-# Push both branches
+# Push main branch (rename master to main if needed)
+git branch -M main
 git push -u origin main
+
+# Push develop branch
+git checkout develop
 git push -u origin develop
+```
+
+### Current branches
+
+- `master` / `main` - stable releases
+- `develop` - integration branch (current)
+
+### Creating feature branches
+
+```bash
+git checkout develop
+git checkout -b feature/my-feature-name
+# ... make changes ...
+git add .
+git commit -m "Description of changes"
+git push -u origin feature/my-feature-name
 ```
 
 ## Development
