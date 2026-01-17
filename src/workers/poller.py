@@ -13,12 +13,13 @@ from concurrent.futures import ThreadPoolExecutor
 from ..app.config import PollerConfig, TableConfig, Region
 from ..capture.screen_capture import ScreenCapture, capture_region
 from ..capture.window_manager import WindowManager, RegisteredWindow
+from ..capture.window_registry import WindowRegistry, TableWindow
 from ..vision.card_recognition import CardRecognizer, build_hole_cards, build_board_cards
 from ..vision.ui_state import UIStateDetector
 from ..poker.models import (
     Observation, Stage, Position, HoleCards, BoardCards, HeroTurnEvent
 )
-from ..poker.positions import get_hero_position
+from ..poker.positions import get_hero_position, get_active_positions
 
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,13 @@ class StatePoller:
     - Debouncing to avoid false triggers
     - Per-window state tracking
     - Event emission on hero turn detection
+    - Support for both WindowManager and WindowRegistry
     """
     
     def __init__(
         self,
-        window_manager: WindowManager,
+        window_manager: Optional[WindowManager] = None,
+        window_registry: Optional[WindowRegistry] = None,
         config: Optional[PollerConfig] = None,
         table_config: Optional[TableConfig] = None,
         on_hero_turn: Optional[Callable[[HeroTurnEvent], None]] = None,
@@ -63,13 +66,15 @@ class StatePoller:
         Initialize state poller.
         
         Args:
-            window_manager: Window manager to get windows from
+            window_manager: Window manager to get windows from (legacy)
+            window_registry: Window registry for multi-table support
             config: Poller configuration
             table_config: Default table configuration for recognition
             on_hero_turn: Callback when hero's turn is detected
             on_observation: Callback for every observation (optional)
         """
         self.window_manager = window_manager
+        self.window_registry = window_registry
         self.config = config or PollerConfig()
         self.table_config = table_config or TableConfig()
         
@@ -99,15 +104,22 @@ class StatePoller:
         Poll a single window and build observation.
         
         Args:
-            window: Registered window to poll
+            window: Registered window to poll (RegisteredWindow or TableWindow)
         
         Returns:
             Observation or None if detection failed
         """
         window_offset = window.info.get_screen_offset()
+        window_id = window.window_id
+        
+        # Get table config - use per-window config if available (TableWindow)
+        if hasattr(window, 'config') and window.config:
+            table_config = window.config
+        else:
+            table_config = self.table_config
         
         # Create UI state detector for this window
-        detector = UIStateDetector(self.table_config, self._capture)
+        detector = UIStateDetector(table_config, self._capture)
         
         # Detect UI state
         ui_state = detector.get_full_state(window_offset)
@@ -118,34 +130,41 @@ class StatePoller:
         
         # Get dealer seat (required for position calculation)
         if dealer_result.seat_index is None:
-            logger.debug(f"[{window.window_id}] Dealer not detected, skipping")
+            logger.debug(f"[{window_id}] Dealer not detected, skipping")
             return None
         
         dealer_seat = dealer_result.seat_index
         
         # Calculate hero position
         hero_position = get_hero_position(
-            self.table_config.hero_seat_index,
+            table_config.hero_seat_index,
             dealer_seat,
             total_seats=8
         )
         
-        # Recognize hero cards
-        hero_cards = self._recognize_hero_cards(window_offset)
+        # Calculate active player positions
+        # Include hero seat in active seats list
+        all_active_seats = active_result.active_seats + [table_config.hero_seat_index]
+        active_positions = tuple(get_active_positions(
+            all_active_seats, dealer_seat, total_seats=8
+        ))
+        
+        # Recognize hero cards using per-window config
+        hero_cards = self._recognize_hero_cards(window_offset, table_config)
         
         # Detect board cards
-        board_cards = self._recognize_board_cards(window_offset)
+        board_cards = self._recognize_board_cards(window_offset, table_config)
         stage = board_cards.get_stage()
         
         # Build observation
         observation = Observation(
             timestamp=datetime.now(),
-            window_id=window.window_id,
+            window_id=window_id,
             stage=stage,
             hero_position=hero_position,
             dealer_seat=dealer_seat,
-            active_players_count=active_result.count + 1,  # +1 for hero
-            active_positions=tuple(),  # TODO: implement position mapping
+            active_players_count=len(all_active_seats),
+            active_positions=active_positions,
             hero_cards=hero_cards,
             board_cards=board_cards,
             is_hero_turn=turn_result.is_hero_turn,
@@ -157,28 +176,35 @@ class StatePoller:
         
         return observation
     
-    def _recognize_hero_cards(self, window_offset: tuple) -> Optional[HoleCards]:
+    def _recognize_hero_cards(
+        self,
+        window_offset: tuple,
+        table_config: Optional[TableConfig] = None
+    ) -> Optional[HoleCards]:
         """
         Recognize hero's hole cards.
         
         Args:
             window_offset: Window screen offset
+            table_config: Table configuration with card regions
         
         Returns:
             HoleCards or None if recognition failed
         """
+        config = table_config or self.table_config
+        
         # Capture card images
         card1_rank_img = capture_region(
-            self.table_config.hero_card1_number, window_offset
+            config.hero_card1_number, window_offset
         )
         card1_suit_img = capture_region(
-            self.table_config.hero_card1_suit, window_offset
+            config.hero_card1_suit, window_offset
         )
         card2_rank_img = capture_region(
-            self.table_config.hero_card2_number, window_offset
+            config.hero_card2_number, window_offset
         )
         card2_suit_img = capture_region(
-            self.table_config.hero_card2_suit, window_offset
+            config.hero_card2_suit, window_offset
         )
         
         # Check all images captured
@@ -205,19 +231,25 @@ class StatePoller:
         
         return HoleCards(card1=result1.card, card2=result2.card)
     
-    def _recognize_board_cards(self, window_offset: tuple) -> BoardCards:
+    def _recognize_board_cards(
+        self,
+        window_offset: tuple,
+        table_config: Optional[TableConfig] = None
+    ) -> BoardCards:
         """
         Recognize board cards (flop/turn/river).
         
         Args:
             window_offset: Window screen offset
+            table_config: Table configuration with board regions
         
         Returns:
             BoardCards (empty if preflop or recognition failed)
         """
+        config = table_config or self.table_config
         cards = []
         
-        for region_dict in self.table_config.board_card_regions:
+        for region_dict in config.board_card_regions:
             if not isinstance(region_dict, dict):
                 continue
             
@@ -317,11 +349,18 @@ class StatePoller:
             start_time = time.time()
             
             try:
-                # Refresh window info
-                self.window_manager.refresh_all()
+                # Get windows to poll - prefer registry over manager
+                windows_to_poll = []
+                
+                if self.window_registry:
+                    self.window_registry.refresh_all()
+                    windows_to_poll = self.window_registry.get_active_windows()
+                elif self.window_manager:
+                    self.window_manager.refresh_all()
+                    windows_to_poll = self.window_manager.get_active_windows()
                 
                 # Poll each active window
-                for window in self.window_manager.get_active_windows():
+                for window in windows_to_poll:
                     state = self._get_or_create_state(window.window_id)
                     
                     try:
@@ -330,6 +369,9 @@ class StatePoller:
                             self._handle_observation(observation, state)
                     except Exception as e:
                         logger.error(f"Error polling {window.window_id}: {e}")
+                        # Track error in TableWindow if available
+                        if hasattr(window, 'mark_error'):
+                            window.mark_error(str(e))
             
             except Exception as e:
                 logger.error(f"Poll loop error: {e}")

@@ -184,9 +184,10 @@ class PlutosApp:
         # Setup windows
         self._setup_windows()
         
-        # Setup poller
+        # Setup poller with window registry for multi-table support
         self._poller = StatePoller(
             window_manager=self._window_manager,
+            window_registry=self._window_registry,
             config=self.config.poller,
             table_config=self.config.default_table,
             on_hero_turn=self._on_hero_turn,
