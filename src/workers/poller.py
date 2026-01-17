@@ -99,8 +99,8 @@ class StatePoller:
         self._recognizer = CardRecognizer()
         
         # Preflop decision engine
-        from ..poker.preflop_engine import PlaceholderPreflopEngine
-        self._preflop_engine = PlaceholderPreflopEngine()
+        from ..poker.preflop_engine import OpeningRangesEngine
+        self._preflop_engine = OpeningRangesEngine()
         
         # Debounce settings
         self._debounce_signals = 1  # Number of consecutive signals needed (instant)
