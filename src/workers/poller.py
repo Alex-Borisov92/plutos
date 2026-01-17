@@ -223,8 +223,16 @@ class StatePoller:
                 state.card_votes.append(recognized)
             hero_cards = recognized
         
+        # Determine minimum votes needed based on position
+        # Early positions (UTG, UTG+1) need more samples for reliability
+        min_votes_for_position = 10 if hero_position in (Position.UTG, Position.UTG1) else 5
+        
         # When recognition window closes, calculate final result
-        if recognition_window_closed and state.final_cards is None and state.card_votes:
+        # But ensure we have minimum votes for early positions
+        has_enough_votes = len(state.card_votes) >= min_votes_for_position if state.card_votes else False
+        can_finalize = recognition_window_closed or has_enough_votes
+        
+        if can_finalize and state.final_cards is None and state.card_votes:
             from collections import Counter
             # Vote on cards (use string representation for hashing)
             votes = [str(c) for c in state.card_votes]
