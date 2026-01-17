@@ -121,7 +121,7 @@ class UIStateDetector:
                     confidence=1.0
                 )
         
-        logger.info(f"Dealer colors: {' '.join(debug_colors)}")
+        logger.debug(f"Dealer colors: {' '.join(debug_colors)}")
         return DealerDetectionResult(
             seat_index=None,
             pixel_color=None,
