@@ -85,16 +85,18 @@ class UIStateDetector:
             
             r, g, b = color
             
-            # Check if red channel is in expected range (dealer button is red/white)
-            if r_min <= r <= r_max:
-                logger.debug(f"Dealer detected at seat {seat_idx}, color=RGB({r},{g},{b})")
+            # Dealer button is gray: R,G,B all in range 50-75 and similar to each other
+            is_gray = (r_min <= r <= r_max and 
+                       r_min <= g <= r_max and 
+                       r_min <= b <= r_max and
+                       abs(r - g) < 15 and abs(g - b) < 15)
+            
+            if is_gray:
                 return DealerDetectionResult(
                     seat_index=seat_idx,
                     pixel_color=color,
                     confidence=1.0
                 )
-        
-        logger.debug("Dealer not detected")
         return DealerDetectionResult(
             seat_index=None,
             pixel_color=None,
@@ -124,6 +126,7 @@ class UIStateDetector:
         all_seats = list(range(8))
         check_seats = [s for s in all_seats if s != self.config.hero_seat_index]
         
+        # All seats enabled
         for list_idx, check in enumerate(self.config.active_player_pixels):
             if list_idx >= len(check_seats):
                 break
@@ -139,11 +142,14 @@ class UIStateDetector:
             
             r, g, b = color
             
-            # Check if red channel matches expected value within tolerance
-            if abs(r - check.r_target) <= tolerance:
+            # Debug logging disabled
+            # logger.debug(f"Seat {seat_idx}: RGB({r},{g},{b})")
+            
+            # Card back is white/light (~240 RGB). Check if all channels > 200
+            # When folded, pixel shows green table or colored avatar
+            if r > 200 and g > 200 and b > 200:
                 active_seats.append(seat_idx)
                 seat_colors[seat_idx] = color
-                logger.debug(f"Active player at seat {seat_idx}, color=RGB({r},{g},{b})")
         
         return ActivePlayersResult(
             active_seats=active_seats,
@@ -181,8 +187,6 @@ class UIStateDetector:
         
         is_turn = r_min <= r <= r_max
         confidence = 1.0 if is_turn else 0.0
-        
-        logger.debug(f"Turn detection: is_turn={is_turn}, color=RGB({r},{g},{b})")
         
         return TurnDetectionResult(
             is_hero_turn=is_turn,

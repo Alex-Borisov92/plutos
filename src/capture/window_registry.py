@@ -172,6 +172,12 @@ class WindowRegistry:
         Returns:
             True if window is still active
         """
+        # Virtual windows (monitors) don't need refresh - always active
+        if window.info.hwnd < 0:
+            window.is_active = True
+            window.clear_errors()
+            return True
+        
         try:
             found = self._manager.find_windows()
             

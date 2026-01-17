@@ -60,7 +60,8 @@ class StatePoller:
         config: Optional[PollerConfig] = None,
         table_config: Optional[TableConfig] = None,
         on_hero_turn: Optional[Callable[[HeroTurnEvent], None]] = None,
-        on_observation: Optional[Callable[[Observation], None]] = None
+        on_observation: Optional[Callable[[Observation], None]] = None,
+        on_debug: Optional[Callable[[str, dict], None]] = None
     ):
         """
         Initialize state poller.
@@ -72,6 +73,7 @@ class StatePoller:
             table_config: Default table configuration for recognition
             on_hero_turn: Callback when hero's turn is detected
             on_observation: Callback for every observation (optional)
+            on_debug: Callback for debug info (window_id, debug_dict)
         """
         self.window_manager = window_manager
         self.window_registry = window_registry
@@ -80,6 +82,7 @@ class StatePoller:
         
         self._on_hero_turn = on_hero_turn
         self._on_observation = on_observation
+        self._on_debug = on_debug
         
         self._window_states: Dict[str, WindowState] = {}
         self._running = False
@@ -91,7 +94,7 @@ class StatePoller:
         self._recognizer = CardRecognizer()
         
         # Debounce settings
-        self._debounce_signals = 2  # Number of consecutive signals needed
+        self._debounce_signals = 1  # Number of consecutive signals needed (instant)
     
     def _get_or_create_state(self, window_id: str) -> WindowState:
         """Get or create window state."""
@@ -128,10 +131,20 @@ class StatePoller:
         active_result = ui_state["active_players"]
         turn_result = ui_state["hero_turn"]
         
+        # Send debug info (always, even when dealer not found)
+        if self._on_debug:
+            self._on_debug(window_id, {
+                "dealer_seat": dealer_result.seat_index,
+                "active_count": active_result.count,
+                "active_seats": active_result.active_seats,
+                "is_turn": turn_result.is_hero_turn,
+                "turn_color": turn_result.pixel_color,
+                "dealer_color": dealer_result.pixel_color,
+            })
+        
         # Get dealer seat (required for position calculation)
         if dealer_result.seat_index is None:
-            logger.debug(f"[{window_id}] Dealer not detected, skipping")
-            return None
+            return None  # No dealer = not at table or between hands
         
         dealer_seat = dealer_result.seat_index
         

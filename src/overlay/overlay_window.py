@@ -8,6 +8,7 @@ import logging
 import ctypes
 import tkinter as tk
 from threading import Thread
+from queue import Queue, Empty
 
 from ..app.config import OverlayConfig
 from ..poker.models import Observation, PreflopDecision, Action
@@ -80,13 +81,16 @@ class OverlayWindow:
         self._thread: Optional[Thread] = None
         self._running = False
         
-        # Text item IDs for updating
-        self._action_text_id = None
-        self._info_text_id = None
+        # StringVars for dynamic text
+        self._action_var: Optional[tk.StringVar] = None
+        self._info_var: Optional[tk.StringVar] = None
         
         # Current position
         self._x = 0
         self._y = 0
+        
+        # Thread-safe update queue
+        self._update_queue: Queue = Queue()
     
     def _create_window(self):
         """Create the Tkinter window (must be called from overlay thread)."""
@@ -99,45 +103,33 @@ class OverlayWindow:
         # Set always on top
         self._root.attributes("-topmost", True)
         
-        # Set transparency
-        self._root.attributes("-alpha", self.config.background_alpha)
+        # NO alpha/transparency - just solid window
         
-        # Set transparent color for click-through
-        self._root.attributes("-transparentcolor", "")
+        # Set geometry - use absolute positive coords for test
+        # Force position to be visible on primary monitor
+        test_x = 100
+        test_y = 100
+        self._root.geometry(f"{self.config.width}x{self.config.height}+{test_x}+{test_y}")
+        logger.info(f"Window geometry: {self.config.width}x{self.config.height}+{test_x}+{test_y}")
         
-        # Set geometry
-        self._root.geometry(
-            f"{self.config.width}x{self.config.height}+{self._x}+{self._y}"
-        )
+        # Configure root background
+        self._root.configure(bg="#1a1a2e")
         
-        # Create canvas with background
-        self._canvas = tk.Canvas(
+        # StringVars for dynamic updates
+        self._action_var = tk.StringVar(value="PLUTOS")
+        self._info_var = tk.StringVar(value="Ready")
+        
+        # Single combined label - simpler approach
+        self._main_label = tk.Label(
             self._root,
-            width=self.config.width,
-            height=self.config.height,
-            bg=self.config.background_color,
-            highlightthickness=2,
-            highlightbackground=self.config.accent_color
+            textvariable=self._action_var,
+            font=("Courier", 14, "bold"),
+            fg="yellow",
+            bg="#1a1a2e",
+            padx=10,
+            pady=10
         )
-        self._canvas.pack(fill=tk.BOTH, expand=True)
-        
-        # Create text elements
-        self._action_text_id = self._canvas.create_text(
-            self.config.width // 2, 35,
-            text="WAITING...",
-            font=("Consolas", self.config.font_size + 4, "bold"),
-            fill=self.config.accent_color,
-            anchor=tk.CENTER
-        )
-        
-        self._info_text_id = self._canvas.create_text(
-            10, 70,
-            text="Position: -\nCards: -\nPlayers: -",
-            font=("Consolas", self.config.font_size),
-            fill=self.config.text_color,
-            anchor=tk.NW,
-            justify=tk.LEFT
-        )
+        self._main_label.pack(expand=True, fill=tk.BOTH)
         
         # Make click-through after window is created
         self._root.update_idletasks()
@@ -147,6 +139,23 @@ class OverlayWindow:
         except Exception as e:
             logger.warning(f"Could not set click-through: {e}")
     
+    def _process_queue(self):
+        """Process pending updates from the queue (called in main loop)."""
+        try:
+            while True:
+                update = self._update_queue.get_nowait()
+                update_type = update.get("type")
+                
+                if update_type == "content":
+                    content = update["content"]
+                    logger.debug(f"Overlay update: {content.action_text}")
+                    self._do_update_content(content)
+                elif update_type == "position":
+                    self._root.geometry(f"+{update['x']}+{update['y']}")
+                    
+        except Empty:
+            pass  # No more updates
+    
     def _run_loop(self):
         """Main loop for the overlay window."""
         self._create_window()
@@ -154,6 +163,7 @@ class OverlayWindow:
         
         try:
             while self._running:
+                self._process_queue()
                 self._root.update()
                 self._root.update_idletasks()
         except tk.TclError:
@@ -211,42 +221,31 @@ class OverlayWindow:
         self._x = x
         self._y = y
         
-        if self._root and self._running:
-            try:
-                self._root.geometry(f"+{x}+{y}")
-            except tk.TclError:
-                pass
+        if self._running:
+            self._update_queue.put({"type": "position", "x": x, "y": y})
+    
+    def _do_update_content(self, content: OverlayContent):
+        """Actually update content (called from main loop thread)."""
+        if not self._action_var:
+            return
+        
+        try:
+            # Combine all info into one line
+            text = f"{content.action_text}\n{content.position_text}"
+            self._action_var.set(text)
+        except tk.TclError as e:
+            logger.warning(f"Update error: {e}")
     
     def update_content(self, content: OverlayContent):
         """
-        Update displayed content.
+        Update displayed content (thread-safe via queue).
         
         Args:
             content: New content to display
         """
-        if not self._running or not self._canvas:
-            return
-        
-        try:
-            # Update action text
-            self._canvas.itemconfig(
-                self._action_text_id,
-                text=content.action_text,
-                fill=content.color
-            )
-            
-            # Update info text
-            info_text = (
-                f"Position: {content.position_text}\n"
-                f"Cards: {content.cards_text}\n"
-                f"Players: {content.players_text}"
-            )
-            self._canvas.itemconfig(
-                self._info_text_id,
-                text=info_text
-            )
-        except tk.TclError:
-            pass
+        # Always put to queue, check running in _process_queue
+        self._update_queue.put({"type": "content", "content": content})
+        logger.info(f"Queued: {content.action_text}, queue size: {self._update_queue.qsize()}")
     
     def show_decision(self, observation: Observation, decision: Optional[PreflopDecision]):
         """
@@ -290,6 +289,25 @@ class OverlayWindow:
             players_text="-",
             stage_text="-",
             color=self.config.accent_color
+        )
+        self.update_content(content)
+    
+    def show_debug(self, dealer_seat: int, active_count: int, is_turn: bool, cards: str = "-"):
+        """Display debug state for calibration."""
+        if dealer_seat is not None:
+            dealer_text = f"D:{dealer_seat}"
+        else:
+            dealer_text = "D:?"
+        
+        turn_text = "TURN!" if is_turn else "wait"
+        
+        content = OverlayContent(
+            action_text=f"{dealer_text} | {turn_text}",
+            position_text=f"Active: {active_count}",
+            cards_text=cards,
+            players_text="-",
+            stage_text="-",
+            color="#00ffff" if dealer_seat is not None else "#ff8800"
         )
         self.update_content(content)
     

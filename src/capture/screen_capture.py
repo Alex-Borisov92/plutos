@@ -129,7 +129,10 @@ class ScreenCapture:
     def close(self):
         """Release resources."""
         if self._sct is not None:
-            self._sct.close()
+            try:
+                self._sct.close()
+            except (AttributeError, Exception):
+                pass  # Thread-local cleanup may fail
             self._sct = None
     
     def __enter__(self):

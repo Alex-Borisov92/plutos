@@ -4,7 +4,7 @@ All paths, thresholds, and settings are centralized here.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import logging
 
 
@@ -62,10 +62,10 @@ class OverlayConfig:
     width: int = 280
     height: int = 120
     font_size: int = 12
-    background_alpha: float = 0.85
-    text_color: str = "#FFFFFF"
-    background_color: str = "#1a1a2e"
-    accent_color: str = "#e94560"
+    background_alpha: float = 0.95
+    text_color: str = "#00FF00"  # Bright green for visibility
+    background_color: str = "#000000"  # Pure black
+    accent_color: str = "#FFFF00"  # Yellow
 
 
 @dataclass
@@ -95,47 +95,47 @@ class TableConfig:
     from the top-left of the poker window's client area.
     """
     # Hero cards regions (relative to window client area)
-    # Calibrated for Pokerdom
-    hero_card1_number: Region = field(default_factory=lambda: Region(1176, 995, 36, 45))
-    hero_card1_suit: Region = field(default_factory=lambda: Region(1173, 1054, 39, 36))
-    hero_card2_number: Region = field(default_factory=lambda: Region(1307, 993, 24, 48))
-    hero_card2_suit: Region = field(default_factory=lambda: Region(1292, 1055, 39, 35))
+    # Calibrated for Pokerdom - from pixel picker coordinates
+    hero_card1_number: Region = field(default_factory=lambda: Region(1166, 986, 35, 46))
+    hero_card1_suit: Region = field(default_factory=lambda: Region(1170, 1045, 36, 35))
+    hero_card2_number: Region = field(default_factory=lambda: Region(1289, 988, 36, 47))
+    hero_card2_suit: Region = field(default_factory=lambda: Region(1287, 1046, 36, 38))
     
-    # Board cards regions (5 cards for flop/turn/river)
+    # Board cards regions (5 cards for flop/turn/river) (+462 offset applied)
     board_card_regions: List[Dict] = field(default_factory=lambda: [
-        {"number": Region(228, 454, 30, 44), "suit": Region(228, 495, 17, 24)},  # Card 1
-        {"number": Region(313, 454, 30, 44), "suit": Region(313, 495, 17, 24)},  # Card 2
-        {"number": Region(401, 454, 30, 44), "suit": Region(399, 495, 17, 24)},  # Card 3
-        {"number": Region(485, 454, 30, 44), "suit": Region(485, 495, 17, 24)},  # Card 4
-        {"number": Region(571, 454, 30, 44), "suit": Region(571, 495, 17, 24)},  # Card 5
+        {"number": Region(690, 454, 30, 44), "suit": Region(690, 495, 17, 24)},  # Card 1
+        {"number": Region(775, 454, 30, 44), "suit": Region(775, 495, 17, 24)},  # Card 2
+        {"number": Region(863, 454, 30, 44), "suit": Region(861, 495, 17, 24)},  # Card 3
+        {"number": Region(947, 454, 30, 44), "suit": Region(947, 495, 17, 24)},  # Card 4
+        {"number": Region(1033, 454, 30, 44), "suit": Region(1033, 495, 17, 24)},  # Card 5
     ])
     
     # Dealer button pixel checks (one per seat, 8 max)
-    # Calibrated for Pokerdom - window at (-470, -1448)
+    # Calibrated for Pokerdom (+462 offset applied)
     # R channel threshold: 50-70 (gray dealer chip)
     dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
-        PixelCoord(1141, 403),   # Seat 0
-        PixelCoord(1603, 407),   # Seat 1
-        PixelCoord(1859, 547),   # Seat 2
-        PixelCoord(1735, 866),   # Seat 3
-        PixelCoord(1406, 948),   # Seat 4 (hero seat)
-        PixelCoord(833, 865),    # Seat 5
-        PixelCoord(709, 547),    # Seat 6
-        PixelCoord(965, 407),    # Seat 7
+        PixelCoord(1596, 395),   # Seat 0 (+462)
+        PixelCoord(2056, 404),   # Seat 1 (+462)
+        PixelCoord(2311, 540),   # Seat 2 (+462)
+        PixelCoord(2189, 858),   # Seat 3 (+462)
+        PixelCoord(1860, 940),   # Seat 4 hero (+462)
+        PixelCoord(1292, 858),   # Seat 5 (+462)
+        PixelCoord(1164, 539),   # Seat 6 (+462)
+        PixelCoord(1418, 400),   # Seat 7 (+462)
     ])
     
     # Active player pixel checks (excluding hero seat)
-    # Calibrated for Pokerdom - checks avatar/stack area
-    # r_target ~240 (light color when player is active)
+    # Calibrated for Pokerdom - checks card back presence
+    # r_target ~240 (white/light when cards visible, dark when folded)
     active_player_pixels: List[PixelCheck] = field(default_factory=lambda: [
-        PixelCheck(1258, 285, r_target=240),   # Seat 0
-        PixelCheck(1722, 346, r_target=240),   # Seat 1
-        PixelCheck(1947, 681, r_target=240),   # Seat 2
-        PixelCheck(1755, 1047, r_target=240),  # Seat 3
+        PixelCheck(1297, 276, r_target=240),    # Seat 0
+        PixelCheck(1713, 339, r_target=240),   # Seat 1
+        PixelCheck(1936, 673, r_target=240),   # Seat 2
+        PixelCheck(1812, 1040, r_target=240),  # Seat 3 (1350+462)
         # Seat 4 is hero - no check needed
-        PixelCheck(811, 1048, r_target=239),   # Seat 5
-        PixelCheck(555, 681, r_target=240),    # Seat 6
-        PixelCheck(785, 345, r_target=242),    # Seat 7
+        PixelCheck(790, 1040, r_target=240),   # Seat 5 (328+462)
+        PixelCheck(599, 673, r_target=240),    # Seat 6 (137+462)
+        PixelCheck(820, 338, r_target=240),    # Seat 7 (358+462)
     ])
     
     # Hero's fixed seat index (0-7)
@@ -143,12 +143,12 @@ class TableConfig:
     
     # Turn detection pixel (when hero needs to act)
     # Calibrated for Pokerdom - green highlight when hero's turn
-    # RGB(108, 201, 128) when active
-    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1097, 1315))
-    turn_indicator_color_range: tuple = (100, 120)  # R channel range when active
+    # RGB(113, 205, 134) when active
+    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(982, 1297))
+    turn_indicator_color_range: tuple = (100, 130)  # R channel range when active
     
-    # Pot region for OCR (relative to window)
-    pot_region: Region = field(default_factory=lambda: Region(379, 320, 130, 35))
+    # Pot region for OCR (relative to window) (+462 offset)
+    pot_region: Region = field(default_factory=lambda: Region(841, 320, 130, 35))
     
     # Position names for 8-max table (starting from dealer, going clockwise)
     positions: List[str] = field(default_factory=lambda: [
@@ -170,6 +170,7 @@ class AppConfig:
     # Multi-table settings
     max_tables: int = 4
     window_title_pattern: str = "NL Hold'em"  # Pattern to match poker windows
+    use_monitor: Optional[int] = None  # Full monitor mode (0=primary, 1=secondary)
     
     # Default table config (will be calibrated per window)
     default_table: TableConfig = field(default_factory=TableConfig)

@@ -12,7 +12,7 @@ from typing import Optional
 from .config import get_config, setup_logging, AppConfig
 from ..capture.window_manager import WindowManager, get_window_manager
 from ..capture.window_registry import WindowRegistry, get_window_registry, TableWindow
-from ..overlay.overlay_window import OverlayManager, OverlayWindow
+from ..overlay.qt_overlay import QtOverlayWindow
 from ..poker.models import Observation, HeroTurnEvent
 from ..poker.preflop_engine import create_engine, PreflopEngine
 from ..storage.db import get_database, Database
@@ -42,7 +42,7 @@ class PlutosApp:
         # Components (initialized in start())
         self._window_registry: Optional[WindowRegistry] = None
         self._window_manager: Optional[WindowManager] = None
-        self._overlay_manager: Optional[OverlayManager] = None
+        self._overlays: dict = {}  # window_id -> QtOverlayWindow
         self._poller: Optional[StatePoller] = None
         self._persister: Optional[PersistenceWorker] = None
         self._engine: Optional[PreflopEngine] = None
@@ -80,7 +80,7 @@ class PlutosApp:
             )
         
         # Update overlay
-        overlay = self._overlay_manager.get_overlay(event.window_id)
+        overlay = self._overlays.get(event.window_id)
         if overlay:
             overlay.show_decision(observation, decision)
         
@@ -101,10 +101,33 @@ class PlutosApp:
         # (hero turn events are always persisted)
         pass
     
+    def _on_debug(self, window_id: str, debug_info: dict):
+        """
+        Handle debug info from poller - update overlay with current state.
+        
+        Args:
+            window_id: Window ID
+            debug_info: Dict with dealer_seat, active_count, is_turn, etc.
+        """
+        # Log debug info
+        dealer = debug_info.get("dealer_seat")
+        active = debug_info.get("active_count", 0)
+        is_turn = debug_info.get("is_turn", False)
+        active_seats = debug_info.get("active_seats", [])
+        
+        logger.info(f"[{window_id}] D:{dealer} Active:{active} Seats:{active_seats} Turn:{is_turn}")
+        
+        overlay = self._overlays.get(window_id)
+        if overlay:
+            overlay.show_debug(
+                dealer_seat=dealer,
+                active_count=active,
+                is_turn=is_turn,
+                cards="-"
+            )
+    
     def _setup_windows(self):
         """Discover and setup poker windows."""
-        logger.info("Discovering poker windows...")
-        
         # Initialize window registry
         self._window_registry = get_window_registry(
             max_windows=self.config.max_tables,
@@ -118,7 +141,26 @@ class PlutosApp:
             title_pattern=self.config.window_title_pattern
         )
         
-        # Discover windows
+        # Check if using monitor mode (for browser-based poker)
+        if self.config.use_monitor is not None:
+            logger.info(f"Using monitor mode: monitor {self.config.use_monitor}")
+            registered = self._window_manager.register_monitor(self.config.use_monitor)
+            if registered:
+                # Create TableWindow wrapper
+                table_window = TableWindow(
+                    window_id=registered.window_id,
+                    info=registered.info,
+                    config=self.config.default_table
+                )
+                self._window_registry._windows[registered.window_id] = table_window
+                self._setup_single_window(table_window)
+                logger.info(f"Monitor {self.config.use_monitor} registered successfully")
+            else:
+                logger.error(f"Failed to register monitor {self.config.use_monitor}")
+            return
+        
+        # Standard window discovery mode
+        logger.info("Discovering poker windows...")
         discovered = self._window_registry.discover_windows()
         
         if not discovered:
@@ -141,11 +183,11 @@ class PlutosApp:
         x = table_window.info.client_left + self.config.overlay.offset_x
         y = table_window.info.client_top + self.config.overlay.offset_y
         
-        # Create overlay
-        overlay = self._overlay_manager.create_overlay(
-            table_window.window_id, x, y
-        )
+        # Create Qt overlay
+        overlay = QtOverlayWindow(table_window.window_id, self.config.overlay)
+        overlay.start(x, y)
         overlay.show_waiting()
+        self._overlays[table_window.window_id] = overlay
         
         # Register in database
         if self._db and self._session_id:
@@ -173,8 +215,7 @@ class PlutosApp:
         self._db = get_database(self.config.db_path)
         self._session_id = self._db.create_session()
         
-        # Initialize components
-        self._overlay_manager = OverlayManager(self.config.overlay)
+        # Initialize components (overlays created per-window)
         self._engine = create_engine("placeholder")
         
         # Setup persistence worker
@@ -191,7 +232,8 @@ class PlutosApp:
             config=self.config.poller,
             table_config=self.config.default_table,
             on_hero_turn=self._on_hero_turn,
-            on_observation=self._on_observation
+            on_observation=self._on_observation,
+            on_debug=self._on_debug
         )
         self._poller.start()
         
@@ -209,8 +251,8 @@ class PlutosApp:
         if self._poller:
             self._poller.stop()
         
-        if self._overlay_manager:
-            self._overlay_manager.stop_all()
+        for overlay in self._overlays.values():
+            overlay.stop()
         
         if self._persister:
             self._persister.stop()
@@ -250,7 +292,7 @@ class PlutosApp:
                     
                     # Update overlay positions
                     for table_window in self._window_registry.get_active_windows():
-                        overlay = self._overlay_manager.get_overlay(table_window.window_id)
+                        overlay = self._overlays.get(table_window.window_id)
                         if overlay:
                             x = table_window.info.client_left + self.config.overlay.offset_x
                             y = table_window.info.client_top + self.config.overlay.offset_y
@@ -289,6 +331,12 @@ def main():
         default=4,
         help="Maximum number of tables to track"
     )
+    parser.add_argument(
+        "--monitor", "-m",
+        type=int,
+        default=None,
+        help="Use full monitor instead of window search (0=primary, 1=secondary)"
+    )
     
     args = parser.parse_args()
     
@@ -300,6 +348,7 @@ def main():
         config.window_title_pattern = args.window_pattern
     
     config.max_tables = args.max_tables
+    config.use_monitor = args.monitor
     
     # Run application
     app = PlutosApp(config)

@@ -155,8 +155,6 @@ class WindowManager:
             return True
         
         EnumWindows(EnumWindowsProc(enum_callback), 0)
-        
-        logger.debug(f"Found {len(found_windows)} windows matching '{search_pattern}'")
         return found_windows
     
     def register_window(
@@ -320,6 +318,63 @@ class WindowManager:
                     newly_registered.append(reg)
         
         return newly_registered
+
+
+    def register_monitor(self, monitor_index: int = 0) -> Optional[RegisteredWindow]:
+        """
+        Register a full monitor as a virtual window.
+        Useful for browser-based poker clients.
+        
+        Args:
+            monitor_index: Monitor index (0 = primary, 1 = secondary, etc.)
+        
+        Returns:
+            RegisteredWindow for the monitor
+        """
+        try:
+            import mss
+            with mss.mss() as sct:
+                # mss.monitors[0] is "all monitors", [1] is primary, [2] is secondary...
+                if monitor_index + 1 >= len(sct.monitors):
+                    logger.error(f"Monitor {monitor_index} not found. Available: {len(sct.monitors) - 1}")
+                    return None
+                
+                mon = sct.monitors[monitor_index + 1]
+                
+                # Create virtual WindowInfo
+                info = WindowInfo(
+                    hwnd=-1,  # Virtual window
+                    title=f"Monitor_{monitor_index}",
+                    rect=(mon["left"], mon["top"], 
+                          mon["left"] + mon["width"], 
+                          mon["top"] + mon["height"]),
+                    client_offset=(0, 0),  # No borders for full screen
+                    client_size=(mon["width"], mon["height"]),
+                )
+                
+                window_id = f"monitor_{monitor_index}"
+                
+                # Check if already registered
+                if window_id in self._registry:
+                    self._registry[window_id].info = info
+                    return self._registry[window_id]
+                
+                registered = RegisteredWindow(
+                    window_id=window_id,
+                    info=info,
+                    table_index=self._next_table_index,
+                    is_active=True,
+                )
+                
+                self._registry[window_id] = registered
+                self._next_table_index += 1
+                
+                logger.info(f"Registered monitor {monitor_index}: {mon['width']}x{mon['height']} at ({mon['left']}, {mon['top']})")
+                return registered
+                
+        except Exception as e:
+            logger.error(f"Failed to register monitor: {e}")
+            return None
 
 
 # Module-level singleton
