@@ -1,0 +1,323 @@
+"""
+State polling worker.
+Monitors poker windows for state changes and emits events when hero's turn is detected.
+"""
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable, Dict, List, Optional
+import logging
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+from ..app.config import PollerConfig, TableConfig, Region
+from ..capture.screen_capture import ScreenCapture, capture_region
+from ..capture.window_manager import WindowManager, RegisteredWindow
+from ..vision.card_recognition import CardRecognizer, build_hole_cards, build_board_cards
+from ..vision.ui_state import UIStateDetector
+from ..poker.models import (
+    Observation, Stage, Position, HoleCards, BoardCards, HeroTurnEvent
+)
+from ..poker.positions import get_hero_position
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WindowState:
+    """Tracked state for a single window."""
+    window_id: str
+    last_observation: Optional[Observation] = None
+    last_turn_state: bool = False
+    consecutive_turn_signals: int = 0
+    last_update_time: float = 0.0
+
+
+class TurnEventCallback:
+    """Typed callback for hero turn events."""
+    def __call__(self, event: HeroTurnEvent) -> None:
+        pass
+
+
+class StatePoller:
+    """
+    Polls poker windows for state changes and detects hero's turn.
+    
+    Features:
+    - Configurable poll frequency
+    - Debouncing to avoid false triggers
+    - Per-window state tracking
+    - Event emission on hero turn detection
+    """
+    
+    def __init__(
+        self,
+        window_manager: WindowManager,
+        config: Optional[PollerConfig] = None,
+        table_config: Optional[TableConfig] = None,
+        on_hero_turn: Optional[Callable[[HeroTurnEvent], None]] = None,
+        on_observation: Optional[Callable[[Observation], None]] = None
+    ):
+        """
+        Initialize state poller.
+        
+        Args:
+            window_manager: Window manager to get windows from
+            config: Poller configuration
+            table_config: Default table configuration for recognition
+            on_hero_turn: Callback when hero's turn is detected
+            on_observation: Callback for every observation (optional)
+        """
+        self.window_manager = window_manager
+        self.config = config or PollerConfig()
+        self.table_config = table_config or TableConfig()
+        
+        self._on_hero_turn = on_hero_turn
+        self._on_observation = on_observation
+        
+        self._window_states: Dict[str, WindowState] = {}
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        
+        # Recognition components
+        self._capture = ScreenCapture()
+        self._recognizer = CardRecognizer()
+        
+        # Debounce settings
+        self._debounce_signals = 2  # Number of consecutive signals needed
+    
+    def _get_or_create_state(self, window_id: str) -> WindowState:
+        """Get or create window state."""
+        if window_id not in self._window_states:
+            self._window_states[window_id] = WindowState(window_id=window_id)
+        return self._window_states[window_id]
+    
+    def _poll_window(self, window: RegisteredWindow) -> Optional[Observation]:
+        """
+        Poll a single window and build observation.
+        
+        Args:
+            window: Registered window to poll
+        
+        Returns:
+            Observation or None if detection failed
+        """
+        window_offset = window.info.get_screen_offset()
+        
+        # Create UI state detector for this window
+        detector = UIStateDetector(self.table_config, self._capture)
+        
+        # Detect UI state
+        ui_state = detector.get_full_state(window_offset)
+        
+        dealer_result = ui_state["dealer"]
+        active_result = ui_state["active_players"]
+        turn_result = ui_state["hero_turn"]
+        
+        # Get dealer seat (required for position calculation)
+        if dealer_result.seat_index is None:
+            logger.debug(f"[{window.window_id}] Dealer not detected, skipping")
+            return None
+        
+        dealer_seat = dealer_result.seat_index
+        
+        # Calculate hero position
+        hero_position = get_hero_position(
+            self.table_config.hero_seat_index,
+            dealer_seat,
+            total_seats=8
+        )
+        
+        # Recognize hero cards
+        hero_cards = self._recognize_hero_cards(window_offset)
+        
+        # For now, assume preflop (board detection not implemented in this iteration)
+        board_cards = BoardCards.empty()
+        stage = Stage.PREFLOP
+        
+        # Build observation
+        observation = Observation(
+            timestamp=datetime.now(),
+            window_id=window.window_id,
+            stage=stage,
+            hero_position=hero_position,
+            dealer_seat=dealer_seat,
+            active_players_count=active_result.count + 1,  # +1 for hero
+            active_positions=tuple(),  # TODO: implement position mapping
+            hero_cards=hero_cards,
+            board_cards=board_cards,
+            is_hero_turn=turn_result.is_hero_turn,
+            confidence={
+                "dealer": dealer_result.confidence,
+                "turn": turn_result.confidence,
+            }
+        )
+        
+        return observation
+    
+    def _recognize_hero_cards(self, window_offset: tuple) -> Optional[HoleCards]:
+        """
+        Recognize hero's hole cards.
+        
+        Args:
+            window_offset: Window screen offset
+        
+        Returns:
+            HoleCards or None if recognition failed
+        """
+        # Capture card images
+        card1_rank_img = capture_region(
+            self.table_config.hero_card1_number, window_offset
+        )
+        card1_suit_img = capture_region(
+            self.table_config.hero_card1_suit, window_offset
+        )
+        card2_rank_img = capture_region(
+            self.table_config.hero_card2_number, window_offset
+        )
+        card2_suit_img = capture_region(
+            self.table_config.hero_card2_suit, window_offset
+        )
+        
+        # Check all images captured
+        if not all([card1_rank_img, card1_suit_img, card2_rank_img, card2_suit_img]):
+            logger.debug("Failed to capture all card regions")
+            return None
+        
+        # Recognize cards
+        result1 = self._recognizer.recognize_card(card1_rank_img, card1_suit_img)
+        result2 = self._recognizer.recognize_card(card2_rank_img, card2_suit_img)
+        
+        if not result1.is_valid or not result2.is_valid:
+            logger.debug(
+                f"Card recognition failed: "
+                f"card1={result1.raw_rank}{result1.raw_suit} "
+                f"card2={result2.raw_rank}{result2.raw_suit}"
+            )
+            return None
+        
+        # Check for duplicates
+        if result1.card == result2.card:
+            logger.warning(f"Duplicate cards detected: {result1.card}")
+            return None
+        
+        return HoleCards(card1=result1.card, card2=result2.card)
+    
+    def _handle_observation(self, observation: Observation, state: WindowState):
+        """
+        Handle a new observation and check for turn changes.
+        
+        Args:
+            observation: New observation
+            state: Window state to update
+        """
+        # Emit observation callback
+        if self._on_observation:
+            try:
+                self._on_observation(observation)
+            except Exception as e:
+                logger.error(f"Observation callback error: {e}")
+        
+        # Check for hero turn with debouncing
+        if observation.is_hero_turn:
+            state.consecutive_turn_signals += 1
+            
+            if (state.consecutive_turn_signals >= self._debounce_signals
+                    and not state.last_turn_state):
+                # Hero turn confirmed - emit event
+                event = HeroTurnEvent(
+                    timestamp=observation.timestamp,
+                    window_id=observation.window_id,
+                    observation=observation
+                )
+                
+                if self._on_hero_turn:
+                    try:
+                        self._on_hero_turn(event)
+                    except Exception as e:
+                        logger.error(f"Hero turn callback error: {e}")
+                
+                state.last_turn_state = True
+                logger.info(
+                    f"[{observation.window_id}] Hero turn detected - "
+                    f"Position: {observation.hero_position.value}, "
+                    f"Cards: {observation.hero_cards}"
+                )
+        else:
+            state.consecutive_turn_signals = 0
+            state.last_turn_state = False
+        
+        state.last_observation = observation
+        state.last_update_time = time.time()
+    
+    def _poll_loop(self):
+        """Main polling loop."""
+        interval = 1.0 / self.config.poll_frequency_hz
+        
+        logger.info(
+            f"Starting poll loop at {self.config.poll_frequency_hz} Hz "
+            f"(interval: {interval*1000:.0f}ms)"
+        )
+        
+        while self._running:
+            start_time = time.time()
+            
+            try:
+                # Refresh window info
+                self.window_manager.refresh_all()
+                
+                # Poll each active window
+                for window in self.window_manager.get_active_windows():
+                    state = self._get_or_create_state(window.window_id)
+                    
+                    try:
+                        observation = self._poll_window(window)
+                        if observation:
+                            self._handle_observation(observation, state)
+                    except Exception as e:
+                        logger.error(f"Error polling {window.window_id}: {e}")
+            
+            except Exception as e:
+                logger.error(f"Poll loop error: {e}")
+            
+            # Sleep for remaining interval
+            elapsed = time.time() - start_time
+            sleep_time = max(0, interval - elapsed)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+    
+    def start(self):
+        """Start the polling thread."""
+        if self._running:
+            logger.warning("Poller already running")
+            return
+        
+        # Load templates for card recognition
+        self._recognizer.load_templates()
+        
+        self._running = True
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
+        logger.info("State poller started")
+    
+    def stop(self):
+        """Stop the polling thread."""
+        self._running = False
+        
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        
+        self._capture.close()
+        logger.info("State poller stopped")
+    
+    def is_running(self) -> bool:
+        """Check if poller is running."""
+        return self._running
+    
+    def get_last_observation(self, window_id: str) -> Optional[Observation]:
+        """Get last observation for a window."""
+        state = self._window_states.get(window_id)
+        return state.last_observation if state else None
