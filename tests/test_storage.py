@@ -176,10 +176,10 @@ class TestDatabaseThreadSafety:
     
     def test_multiple_connections(self):
         """Test that connections work across multiple threads."""
-        import threading
         import concurrent.futures
         
-        with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = tempfile.mkdtemp()
+        try:
             db_path = Path(tmpdir) / "test.db"
             db = Database(db_path)
             
@@ -198,3 +198,12 @@ class TestDatabaseThreadSafety:
             assert len(set(results)) == 10  # All unique
             
             db.close()
+        finally:
+            # On Windows, SQLite may hold file locks briefly after close
+            import time
+            time.sleep(0.1)
+            try:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass  # Ignore cleanup errors on Windows
