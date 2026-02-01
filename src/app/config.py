@@ -57,23 +57,26 @@ class PollerConfig:
 @dataclass
 class OverlayConfig:
     """Configuration for the overlay window."""
-    offset_x: int = 897  # Offset from window left edge (calibrated)
-    offset_y: int = 1029  # Offset from window top edge (calibrated)
-    width: int = 224  # 80% of 280
-    height: int = 96  # 80% of 120
-    font_size: int = 10  # 80% of 12
+    offset_x: int = 800   # Offset from window left edge
+    offset_y: int = 900   # Offset from window top edge
+    width: int = 224
+    height: int = 96
+    font_size: int = 10
     background_alpha: float = 0.95
-    text_color: str = "#00FF00"  # Bright green for visibility
-    background_color: str = "#000000"  # Pure black
+    text_color: str = "#00FF00"  # Bright green
+    background_color: str = "#000000"  # Black
     accent_color: str = "#FFFF00"  # Yellow
 
 
 @dataclass
 class VisionConfig:
     """Configuration for card recognition."""
-    template_match_threshold: float = 0.4  # For rank matching (lowered for detection)
-    suit_match_threshold: float = 0.0  # For suit matching (0.0 = any match, like legacy)
-    ocr_config: str = "--psm 7 -c tessedit_char_whitelist=0123456789,."
+    # OCR config for card ranks (digits + face cards)
+    rank_ocr_config: str = "--psm 10 -c tessedit_char_whitelist=23456789TJQKA"
+    # OCR config for stacks (digits + comma + BB)
+    stack_ocr_config: str = "--psm 7 -c tessedit_char_whitelist=0123456789,."
+    # OCR config for pot
+    pot_ocr_config: str = "--psm 7 -c tessedit_char_whitelist=0123456789,."
     
     # Valid card values for validation
     valid_ranks: str = "23456789TJQKA"
@@ -85,88 +88,107 @@ class TableConfig:
     """Configuration for a single poker table window.
     
     All coordinates are RELATIVE to the window client area origin (0,0).
-    This allows the same config to work regardless of window position on screen.
+    Calibrated for new screen - 2025-02-01.
     
-    NOTE: You need to calibrate these values for your specific poker client.
-    Use the calibration tool (coming soon) or manually measure pixel positions.
-    
-    The original script used negative screen coordinates, which were tied to
-    a specific monitor setup. These relative coords should be positive offsets
-    from the top-left of the poker window's client area.
+    9-max MTT positions: UTG, UTG+1, UTG+2, LJ, HJ, CO, BTN, SB, BB
     """
-    # Hero cards regions (relative to window client area)
-    # Calibrated for Pokerdom - from pixel picker coordinates
-    hero_card1_number: Region = field(default_factory=lambda: Region(1166, 986, 35, 46))
-    hero_card1_suit: Region = field(default_factory=lambda: Region(1170, 1045, 36, 35))
-    hero_card2_number: Region = field(default_factory=lambda: Region(1289, 988, 36, 47))
-    hero_card2_suit: Region = field(default_factory=lambda: Region(1287, 1046, 36, 38))
     
-    # Hero cards suit pixel for color-based detection (faster and more reliable)
-    # Calibrated: left card X=715, right card X=848, Y=-370 -> relative (+462, +1440)
-    hero_card1_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1177, 1066))
-    hero_card2_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(1310, 1070))
+    # Hero cards - number regions for Tesseract OCR
+    hero_card1_number: Region = field(default_factory=lambda: Region(871, 824, 30, 43))
+    hero_card2_number: Region = field(default_factory=lambda: Region(968, 827, 27, 37))
     
-    # Board cards regions (5 cards for flop/turn/river) (+462 offset applied)
-    board_card_regions: List[Dict] = field(default_factory=lambda: [
-        {"number": Region(690, 454, 30, 44), "suit": Region(690, 495, 17, 24)},  # Card 1
-        {"number": Region(775, 454, 30, 44), "suit": Region(775, 495, 17, 24)},  # Card 2
-        {"number": Region(863, 454, 30, 44), "suit": Region(861, 495, 17, 24)},  # Card 3
-        {"number": Region(947, 454, 30, 44), "suit": Region(947, 495, 17, 24)},  # Card 4
-        {"number": Region(1033, 454, 30, 44), "suit": Region(1033, 495, 17, 24)},  # Card 5
+    # Hero cards - suit pixel for color-based detection
+    hero_card1_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(876, 891))
+    hero_card2_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(973, 888))
+    
+    # Board cards - number regions for Tesseract OCR (5 cards)
+    # Card 5 placeholder - needs calibration
+    board_card_regions: List[Region] = field(default_factory=lambda: [
+        Region(725, 512, 32, 41),   # Card 1
+        Region(823, 513, 32, 43),   # Card 2
+        Region(919, 514, 35, 40),   # Card 3
+        Region(1109, 512, 38, 45),  # Card 4
+        Region(1015, 512, 35, 45),  # Card 5 - TODO: calibrate exact position
     ])
     
-    # Dealer button pixel checks (one per seat, 8 max)
-    # Calibrated for Pokerdom (+462 offset applied)
-    # R channel threshold: 50-70 (gray dealer chip)
+    # Board cards - suit pixels for color-based detection
+    # Card 5 placeholder - needs calibration
+    board_suit_pixels: List[PixelCoord] = field(default_factory=lambda: [
+        PixelCoord(730, 576),   # Card 1
+        PixelCoord(827, 578),   # Card 2
+        PixelCoord(925, 576),   # Card 3
+        PixelCoord(1116, 581),  # Card 4
+        PixelCoord(1020, 578),  # Card 5 - TODO: calibrate
+    ])
+    
+    # Dealer button pixel checks (one per seat, 9 max)
+    # Seat order: 0=top-center, going clockwise
     dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
-        PixelCoord(1130, 396),   # Seat 0 (calibrated)
-        PixelCoord(1594, 401),   # Seat 1 (calibrated)
-        PixelCoord(1852, 540),   # Seat 2 (calibrated)
-        PixelCoord(1724, 859),   # Seat 3 (calibrated)
-        PixelCoord(1397, 940),   # Seat 4 hero (calibrated)
-        PixelCoord(825, 858),    # Seat 5 (calibrated)
-        PixelCoord(701, 539),    # Seat 6 (calibrated)
-        PixelCoord(955, 400),    # Seat 7 (calibrated)
+        PixelCoord(839, 344),   # Seat 0
+        PixelCoord(1216, 347),  # Seat 1
+        PixelCoord(1423, 458),  # Seat 2
+        PixelCoord(1320, 717),  # Seat 3
+        PixelCoord(1054, 784),  # Seat 4 (hero)
+        PixelCoord(590, 718),   # Seat 5
+        PixelCoord(488, 458),   # Seat 6
+        PixelCoord(695, 345),   # Seat 7
     ])
     
-    # Active player pixel checks (excluding hero seat)
-    # Calibrated for Pokerdom - checks card back presence
-    # r_target ~240 (white/light when cards visible, dark when folded)
+    # Active player pixel checks (card back presence)
+    # r_target ~240 (white/light when cards visible)
     active_player_pixels: List[PixelCheck] = field(default_factory=lambda: [
-        PixelCheck(1297, 276, r_target=240),    # Seat 0
-        PixelCheck(1713, 339, r_target=240),   # Seat 1
-        PixelCheck(1936, 673, r_target=240),   # Seat 2
-        PixelCheck(1812, 1040, r_target=240),  # Seat 3 (1350+462)
+        PixelCheck(933, 246, r_target=240),   # Seat 0
+        PixelCheck(1302, 295, r_target=220),  # Seat 1
+        PixelCheck(1498, 566, r_target=240),  # Seat 2
+        PixelCheck(1333, 865, r_target=240),  # Seat 3
         # Seat 4 is hero - no check needed
-        PixelCheck(790, 1040, r_target=240),   # Seat 5 (328+462)
-        PixelCheck(599, 673, r_target=240),    # Seat 6 (137+462)
-        PixelCheck(820, 338, r_target=240),    # Seat 7 (358+462)
+        PixelCheck(565, 865, r_target=238),   # Seat 5
+        PixelCheck(408, 568, r_target=240),   # Seat 6
+        PixelCheck(594, 297, r_target=248),   # Seat 7
     ])
     
-    # Hero's fixed seat index (0-7)
+    # Player stack regions for OCR (all seats including hero)
+    player_stack_regions: List[Optional[Region]] = field(default_factory=lambda: [
+        Region(895, 313, 122, 27),   # Seat 0
+        Region(1283, 362, 120, 26),  # Seat 1
+        Region(1460, 638, 109, 28),  # Seat 2
+        Region(1299, 935, 120, 22),  # Seat 3
+        Region(894, 985, 129, 28),   # Seat 4 (hero)
+        Region(499, 931, 112, 31),   # Seat 5
+        Region(350, 638, 110, 28),   # Seat 6 - TODO: calibrate
+        Region(523, 365, 102, 30),   # Seat 7
+    ])
+    
+    # Hero's fixed seat index (0-7 for 8-max, 0-8 for 9-max)
     hero_seat_index: int = 4
     
-    # Turn detection pixel (when hero needs to act)
-    # Calibrated for Pokerdom - green highlight when hero's turn
-    # RGB(113, 205, 134) when active
-    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(982, 1359))
-    turn_indicator_color_range: tuple = (100, 130)  # R channel range when active
+    # Turn detection pixel (green highlight when hero's turn)
+    # RGB(84, 208, 136) when active
+    turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(705, 1070))
+    turn_indicator_color_range: tuple = (70, 100)  # R channel range when active (green has low R)
     
-    # Pot region for OCR (relative to window) (+462 offset)
-    pot_region: Region = field(default_factory=lambda: Region(841, 320, 130, 35))
+    # Pot region for OCR
+    pot_region: Region = field(default_factory=lambda: Region(850, 380, 150, 35))  # TODO: calibrate
     
-    # Hand ID region for detecting new hands (top of screen)
-    # Calibrated from (959,-1430) to (1046,-1413)
-    hand_id_region: Region = field(default_factory=lambda: Region(1421, 10, 87, 17))
+    # Hand ID region for detecting new hands
+    hand_id_region: Region = field(default_factory=lambda: Region(418, 6, 101, 10))
     
-    # Hero stack region for OCR (displays "XX,XX BB")
-    # Calibrated from (749,-254) to (877,-225) -> relative (1211, 1186)
-    hero_stack_region: Region = field(default_factory=lambda: Region(1211, 1186, 140, 35))
+    # Hero stack region (same as player_stack_regions[hero_seat_index])
+    hero_stack_region: Region = field(default_factory=lambda: Region(894, 985, 129, 28))
     
-    # Position names for 8-max table (starting from dealer, going clockwise)
-    positions: List[str] = field(default_factory=lambda: [
-        "BTN", "SB", "BB", "UTG", "UTG+1", "MP", "HJ", "CO"
+    # Position names for 9-max MTT (from preflop ranges)
+    # Order matches seat indices starting from BTN
+    positions_9max: List[str] = field(default_factory=lambda: [
+        "BTN", "SB", "BB", "UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"
     ])
+    
+    # Position names for 8-max (no UTG+2)
+    positions_8max: List[str] = field(default_factory=lambda: [
+        "BTN", "SB", "BB", "UTG", "UTG+1", "LJ", "HJ", "CO"
+    ])
+    
+    # Default player count
+    player_count: int = 8
 
 
 @dataclass
@@ -183,14 +205,19 @@ class AppConfig:
     # Multi-table settings
     max_tables: int = 4
     window_title_pattern: str = "NL Hold'em"  # Pattern to match poker windows
-    use_monitor: Optional[int] = None  # Full monitor mode (0=primary, 1=secondary)
+    use_monitor: Optional[int] = None  # Full monitor mode
     
-    # Default table config (will be calibrated per window)
+    # Default table config
     default_table: TableConfig = field(default_factory=TableConfig)
+    
+    # Game settings
+    player_count: int = 8  # Default 8 players (can be 6, 8, or 9)
+    table_count: int = 1   # Number of tables to track
     
     # Feature flags
     debug_screenshots: bool = False
     verbose_logging: bool = False
+    rfi_only_mode: bool = True  # Only show opens when no action before us
 
 
 def get_config() -> AppConfig:

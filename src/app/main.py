@@ -117,12 +117,13 @@ class PlutosApp:
         active_seats = debug_info.get("active_seats", [])
         
         # Calculate hero position (hero is always seat 4)
-        hero_seat = 4
+        hero_seat = self.config.default_table.hero_seat_index
+        total_seats = self.config.player_count
         hero_pos = None
         active_positions = []
         if dealer is not None:
-            hero_pos = get_hero_position(hero_seat, dealer, total_seats=8)
-            active_positions = get_active_positions(active_seats, dealer, total_seats=8)
+            hero_pos = get_hero_position(hero_seat, dealer, total_seats=total_seats)
+            active_positions = get_active_positions(active_seats, dealer, total_seats=total_seats)
         
         hand_id = debug_info.get("hand_id", "")
         is_new = debug_info.get("is_new_hand", False)
@@ -276,7 +277,11 @@ class PlutosApp:
         self._session_id = self._db.create_session()
         
         # Initialize components (overlays created per-window)
-        self._engine = create_engine("placeholder")
+        # Use ranges-based engine with RFI-only mode from config
+        self._engine = create_engine(
+            "ranges",
+            rfi_only_mode=self.config.rfi_only_mode
+        )
         
         # Setup persistence worker
         self._persister = PersistenceWorker(self._db, self._session_id)
@@ -388,14 +393,32 @@ def main():
     parser.add_argument(
         "--max-tables", "-t",
         type=int,
-        default=4,
-        help="Maximum number of tables to track"
+        default=1,
+        help="Maximum number of tables to track (default: 1)"
+    )
+    parser.add_argument(
+        "--players", "-p",
+        type=int,
+        default=8,
+        choices=[6, 8, 9],
+        help="Number of players at table (default: 8)"
     )
     parser.add_argument(
         "--monitor", "-m",
         type=int,
         default=None,
         help="Use full monitor instead of window search (0=primary, 1=secondary)"
+    )
+    parser.add_argument(
+        "--rfi-only",
+        action="store_true",
+        default=True,
+        help="Only show recommendations for RFI spots (default: True)"
+    )
+    parser.add_argument(
+        "--full-ranges",
+        action="store_true",
+        help="Show recommendations for all spots (disable RFI-only mode)"
     )
     
     args = parser.parse_args()
@@ -408,7 +431,20 @@ def main():
         config.window_title_pattern = args.window_pattern
     
     config.max_tables = args.max_tables
+    config.table_count = args.max_tables
+    config.player_count = args.players
+    config.default_table.player_count = args.players
     config.use_monitor = args.monitor
+    
+    # RFI-only mode (default True, --full-ranges disables it)
+    config.rfi_only_mode = not args.full_ranges
+    
+    # Log startup configuration
+    print(f"Plutos Poker Helper")
+    print(f"  Tables: {config.table_count}")
+    print(f"  Players: {config.player_count}")
+    print(f"  RFI-only mode: {config.rfi_only_mode}")
+    print()
     
     # Run application
     app = PlutosApp(config)

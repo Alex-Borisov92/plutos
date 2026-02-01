@@ -13,7 +13,7 @@ def get_cursor_pos():
     """Get current cursor position."""
     point = wintypes.POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
-    return point.x, point.y
+    return point.x, point.y      
 
 def get_pixel_color(x, y):
     """Get RGB color at position."""

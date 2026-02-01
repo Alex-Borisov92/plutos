@@ -1,22 +1,34 @@
 """
-Card recognition using template matching and OCR.
+Card recognition using Tesseract OCR and color-based suit detection.
+
 Handles card detection, validation, and deduplication.
+- Rank recognition: Tesseract OCR
+- Suit recognition: Color-based pixel detection (fast and reliable)
 """
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
-import os
+import re
 
-import cv2
 import numpy as np
 from PIL import Image
 
-from ..app.config import Region, VisionConfig, TEMPLATES_DIR, NUMBER_TEMPLATES_DIR
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
+from ..app.config import Region, VisionConfig, TESSERACT_PATH
 from ..poker.models import Card, HoleCards, BoardCards
 
 
 logger = logging.getLogger(__name__)
+
+# Configure Tesseract path
+if TESSERACT_AVAILABLE:
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 
 @dataclass
@@ -30,91 +42,26 @@ class RecognitionResult:
     error: Optional[str] = None
 
 
-class TemplateCache:
-    """Caches loaded template images."""
-    
-    def __init__(self):
-        self._rank_templates: Dict[str, np.ndarray] = {}
-        self._suit_templates: Dict[str, np.ndarray] = {}
-        self._loaded = False
-    
-    def load_templates(
-        self,
-        rank_dir: Path = NUMBER_TEMPLATES_DIR,
-        suit_dir: Path = TEMPLATES_DIR
-    ) -> bool:
-        """
-        Load all template images from directories.
-        
-        Returns:
-            True if templates loaded successfully
-        """
-        if self._loaded:
-            return True
-        
-        # Rank templates (2-A)
-        rank_files = {
-            "2": "2.png", "3": "3.png", "4": "4.png", "5": "5.png",
-            "6": "6.png", "7": "7.png", "8": "8.png", "9": "9.png",
-            "T": "10.png", "J": "J.png", "Q": "Q.png", "K": "K.png", "A": "A.png"
-        }
-        
-        for rank, filename in rank_files.items():
-            path = rank_dir / filename
-            if path.exists():
-                template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-                if template is not None:
-                    self._rank_templates[rank] = template
-                else:
-                    logger.warning(f"Failed to load rank template: {path}")
-            else:
-                logger.debug(f"Rank template not found: {path}")
-        
-        # Suit templates
-        suit_files = {
-            "s": "spades.png",
-            "h": "hearts.png",
-            "d": "diamonds.png",
-            "c": "clubs.png"
-        }
-        
-        for suit, filename in suit_files.items():
-            path = suit_dir / filename
-            if path.exists():
-                template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-                if template is not None:
-                    self._suit_templates[suit] = template
-                else:
-                    logger.warning(f"Failed to load suit template: {path}")
-            else:
-                logger.debug(f"Suit template not found: {path}")
-        
-        self._loaded = len(self._rank_templates) > 0 or len(self._suit_templates) > 0
-        logger.info(
-            f"Loaded {len(self._rank_templates)} rank templates, "
-            f"{len(self._suit_templates)} suit templates"
-        )
-        return self._loaded
-    
-    @property
-    def rank_templates(self) -> Dict[str, np.ndarray]:
-        return self._rank_templates
-    
-    @property
-    def suit_templates(self) -> Dict[str, np.ndarray]:
-        return self._suit_templates
-
-
 class CardRecognizer:
     """
-    Recognizes cards from screen captures using template matching.
+    Recognizes cards from screen captures using OCR and color detection.
+    
+    - Ranks: Tesseract OCR with whitelist
+    - Suits: Color-based pixel detection
     """
     
-    # Unicode suit mappings for UI format conversion
-    SUIT_MAP = {
-        "♠": "s", "♥": "h", "♦": "d", "♣": "c",
-        "spade": "s", "heart": "h", "diamond": "d", "club": "c",
+    # Map OCR output to standard rank notation
+    RANK_MAP = {
+        "1": "A",  # Sometimes OCR reads A as 1
+        "0": "T",  # 10 -> T
+        "10": "T",
+        "l": "J",  # lowercase L -> J
+        "i": "J",  # i -> J
+        "O": "Q",  # O -> Q sometimes
     }
+    
+    # Valid ranks after normalization
+    VALID_RANKS = frozenset("23456789TJQKA")
     
     def __init__(self, config: Optional[VisionConfig] = None):
         """
@@ -124,61 +71,13 @@ class CardRecognizer:
             config: Vision configuration (uses defaults if not provided)
         """
         self.config = config or VisionConfig()
-        self._cache = TemplateCache()
+        
+        if not TESSERACT_AVAILABLE:
+            logger.warning("pytesseract not available, OCR disabled")
     
-    def load_templates(self) -> bool:
-        """Load template images. Call before recognition."""
-        return self._cache.load_templates()
-    
-    def _match_template(
-        self,
-        image: np.ndarray,
-        templates: Dict[str, np.ndarray],
-        threshold: float
-    ) -> Tuple[Optional[str], float]:
+    def recognize_rank_ocr(self, image: Image.Image) -> Tuple[Optional[str], float]:
         """
-        Match image against templates.
-        
-        Returns:
-            (matched_key, confidence) or (None, 0.0)
-        """
-        best_match = None
-        best_confidence = -np.inf
-        
-        for key, template in templates.items():
-            # Resize image if smaller than template
-            if image.shape[0] < template.shape[0] or image.shape[1] < template.shape[1]:
-                scale = max(
-                    template.shape[1] / image.shape[1],
-                    template.shape[0] / image.shape[0]
-                )
-                new_size = (
-                    int(image.shape[1] * scale) + 1,
-                    int(image.shape[0] * scale) + 1
-                )
-                image_scaled = cv2.resize(image, new_size, interpolation=cv2.INTER_LINEAR)
-            else:
-                image_scaled = image
-            
-            try:
-                result = cv2.matchTemplate(image_scaled, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-                
-                if max_val > best_confidence:
-                    best_confidence = max_val
-                    best_match = key
-            except cv2.error as e:
-                logger.debug(f"Template match error for {key}: {e}")
-                continue
-        
-        if best_match and best_confidence >= threshold:
-            return best_match, best_confidence
-        
-        return None, best_confidence
-    
-    def recognize_rank(self, image: Image.Image) -> Tuple[Optional[str], float]:
-        """
-        Recognize card rank from image.
+        Recognize card rank using Tesseract OCR.
         
         Args:
             image: PIL Image of the rank portion
@@ -186,40 +85,46 @@ class CardRecognizer:
         Returns:
             (rank, confidence) or (None, 0.0)
         """
-        if not self._cache.rank_templates:
-            logger.warning("No rank templates loaded")
+        if not TESSERACT_AVAILABLE:
             return None, 0.0
         
-        # Convert to grayscale numpy array
-        img_gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-        
-        return self._match_template(
-            img_gray,
-            self._cache.rank_templates,
-            self.config.template_match_threshold
-        )
-    
-    def recognize_suit(self, image: Image.Image) -> Tuple[Optional[str], float]:
-        """
-        Recognize card suit from image.
-        
-        Args:
-            image: PIL Image of the suit portion
-        
-        Returns:
-            (suit, confidence) or (None, 0.0)
-        """
-        if not self._cache.suit_templates:
-            logger.warning("No suit templates loaded")
+        try:
+            # Preprocess image for better OCR
+            img = image.convert('L')  # Grayscale
+            img_array = np.array(img)
+            
+            # Increase contrast
+            img_array = np.clip(img_array * 1.5, 0, 255).astype(np.uint8)
+            
+            # Threshold to binary
+            threshold = 128
+            img_array = np.where(img_array > threshold, 255, 0).astype(np.uint8)
+            
+            img_processed = Image.fromarray(img_array)
+            
+            # OCR with single character mode
+            ocr_config = self.config.rank_ocr_config
+            text = pytesseract.image_to_string(img_processed, config=ocr_config)
+            text = text.strip().upper()
+            
+            if not text:
+                return None, 0.0
+            
+            # Take first character/token
+            rank = text[0] if len(text) == 1 else text[:2] if text.startswith("10") else text[0]
+            
+            # Normalize
+            rank = self.RANK_MAP.get(rank, rank)
+            
+            if rank in self.VALID_RANKS:
+                return rank, 0.9
+            
+            logger.debug(f"OCR result '{text}' not valid rank")
             return None, 0.0
-        
-        img_gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-        
-        return self._match_template(
-            img_gray,
-            self._cache.suit_templates,
-            self.config.suit_match_threshold
-        )
+            
+        except Exception as e:
+            logger.debug(f"OCR error: {e}")
+            return None, 0.0
     
     @staticmethod
     def recognize_suit_by_color(rgb: Tuple[int, int, int]) -> Tuple[str, float]:
@@ -227,11 +132,11 @@ class CardRecognizer:
         Recognize card suit by pixel color.
         Much faster and more reliable than template matching.
         
-        Colors:
-        - Hearts (red): R > 150
+        Colors (Pokerdom):
+        - Hearts (red): R > 150 and R > G and R > B
         - Clubs (green): G > 100 and G > R and G > B
         - Diamonds (blue): B > 80 and B > R
-        - Spades (black): everything else
+        - Spades (black/dark): everything else
         
         Args:
             rgb: (R, G, B) tuple
@@ -245,7 +150,7 @@ class CardRecognizer:
         if r > 150 and r > g and r > b:
             return 'h', 1.0
         
-        # Clubs - green
+        # Clubs - green (Pokerdom uses green for clubs)
         if g > 100 and g > r and g > b:
             return 'c', 1.0
         
@@ -259,20 +164,20 @@ class CardRecognizer:
     def recognize_card(
         self,
         rank_image: Image.Image,
-        suit_image: Image.Image
+        suit_rgb: Tuple[int, int, int]
     ) -> RecognitionResult:
         """
-        Recognize a complete card from rank and suit images.
+        Recognize a complete card from rank image and suit color.
         
         Args:
             rank_image: PIL Image of the rank
-            suit_image: PIL Image of the suit
+            suit_rgb: RGB tuple from suit pixel
         
         Returns:
             RecognitionResult with card or error
         """
-        rank, rank_conf = self.recognize_rank(rank_image)
-        suit, suit_conf = self.recognize_suit(suit_image)
+        rank, rank_conf = self.recognize_rank_ocr(rank_image)
+        suit, suit_conf = self.recognize_suit_by_color(suit_rgb)
         
         confidence = min(rank_conf, suit_conf)
         
@@ -281,19 +186,9 @@ class CardRecognizer:
                 card=None,
                 confidence=confidence,
                 raw_rank="?",
-                raw_suit=suit or "?",
+                raw_suit=suit,
                 is_valid=False,
                 error="Failed to recognize rank"
-            )
-        
-        if suit is None:
-            return RecognitionResult(
-                card=None,
-                confidence=confidence,
-                raw_rank=rank,
-                raw_suit="?",
-                is_valid=False,
-                error="Failed to recognize suit"
             )
         
         # Validate card
@@ -322,9 +217,9 @@ class CardRecognizer:
         Convert UI format card string to Card object.
         
         Handles formats like:
-        - "K♥" -> Kh
+        - "K heart" -> Kh
         - "Ah" -> Ah
-        - "10♠" -> Ts
+        - "10 spade" -> Ts
         
         Args:
             ui_string: Card string from UI
@@ -332,6 +227,11 @@ class CardRecognizer:
         Returns:
             Card or None if invalid
         """
+        SUIT_MAP = {
+            "spade": "s", "heart": "h", "diamond": "d", "club": "c",
+            "spades": "s", "hearts": "h", "diamonds": "d", "clubs": "c",
+        }
+        
         ui_string = ui_string.strip()
         if not ui_string or len(ui_string) < 2:
             return None
@@ -346,7 +246,7 @@ class CardRecognizer:
         
         # Map suit
         suit_part = suit_part.strip().lower()
-        suit = CardRecognizer.SUIT_MAP.get(suit_part, suit_part)
+        suit = SUIT_MAP.get(suit_part, suit_part)
         
         # Validate
         if rank not in Card.VALID_RANKS:
@@ -373,6 +273,62 @@ class CardRecognizer:
         if len(card_str) != 2:
             return False
         return card_str[0] in Card.VALID_RANKS and card_str[1] in Card.VALID_SUITS
+
+
+def recognize_stack_ocr(
+    image: Image.Image,
+    config: Optional[VisionConfig] = None
+) -> Optional[float]:
+    """
+    Recognize player stack from image using OCR.
+    
+    Expects format like "151,52" or "25.5" (in BB).
+    
+    Args:
+        image: PIL Image of stack region
+        config: Vision config
+    
+    Returns:
+        Stack in BB as float, or None if recognition failed
+    """
+    if not TESSERACT_AVAILABLE:
+        return None
+    
+    config = config or VisionConfig()
+    
+    try:
+        # Preprocess
+        img = image.convert('L')
+        img_array = np.array(img)
+        
+        # Threshold
+        img_array = np.where(img_array > 100, 255, 0).astype(np.uint8)
+        img_processed = Image.fromarray(img_array)
+        
+        # OCR
+        text = pytesseract.image_to_string(
+            img_processed,
+            config=config.stack_ocr_config
+        )
+        text = text.strip()
+        
+        if not text:
+            return None
+        
+        # Parse number (handle comma as decimal separator)
+        text = text.replace(',', '.').replace(' ', '')
+        
+        # Remove non-numeric suffix (like "BB")
+        text = re.sub(r'[^0-9.]', '', text)
+        
+        if text:
+            return float(text)
+        
+        return None
+        
+    except Exception as e:
+        logger.debug(f"Stack OCR error: {e}")
+        return None
 
 
 def convert_cards_list(

@@ -1,24 +1,40 @@
 """
 Position and seat mapping logic.
 Handles conversion between seat indices and position names based on dealer location.
+
+9-max MTT positions: UTG, UTG+1, UTG+2, LJ, HJ, CO, BTN, SB, BB
+8-max positions: UTG, UTG+1, LJ, HJ, CO, BTN, SB, BB
 """
 from typing import List, Optional
 from .models import Position
 
 
-# Standard 8-max position order starting from BTN
+# Standard 9-max position order starting from BTN (going clockwise)
+POSITIONS_9MAX = [
+    Position.BTN,
+    Position.SB,
+    Position.BB,
+    Position.UTG,
+    Position.UTG1,    # UTG+1
+    Position.UTG2,    # UTG+2
+    Position.LJ,      # Lojack
+    Position.HJ,      # Hijack
+    Position.CO,      # Cutoff
+]
+
+# 8-max positions (no UTG+2)
 POSITIONS_8MAX = [
     Position.BTN,
     Position.SB,
     Position.BB,
     Position.UTG,
-    Position.UTG1,
-    Position.MP,
-    Position.HJ,
-    Position.CO,
+    Position.UTG1,    # UTG+1
+    Position.LJ,      # Lojack
+    Position.HJ,      # Hijack
+    Position.CO,      # Cutoff
 ]
 
-# Position order for fewer players
+# 6-max positions
 POSITIONS_6MAX = [
     Position.BTN,
     Position.SB,
@@ -28,12 +44,31 @@ POSITIONS_6MAX = [
     Position.CO,
 ]
 
-POSITIONS_4MAX = [
-    Position.BTN,
-    Position.SB,
+# Heads-up / 2-max
+POSITIONS_2MAX = [
+    Position.BTN,  # BTN is also SB heads-up
     Position.BB,
-    Position.CO,
 ]
+
+
+def get_positions_for_table_size(total_seats: int) -> List[Position]:
+    """
+    Get position list for given table size.
+    
+    Args:
+        total_seats: Number of players at the table
+    
+    Returns:
+        List of Position enums in action order (BTN first)
+    """
+    if total_seats <= 2:
+        return POSITIONS_2MAX
+    elif total_seats <= 6:
+        return POSITIONS_6MAX
+    elif total_seats <= 8:
+        return POSITIONS_8MAX
+    else:
+        return POSITIONS_9MAX
 
 
 def get_position_from_seat(
@@ -59,12 +94,7 @@ def get_position_from_seat(
     relative_pos = (seat_index - dealer_seat) % total_seats
     
     # Select appropriate position list based on table size
-    if total_seats <= 4:
-        positions = POSITIONS_4MAX
-    elif total_seats <= 6:
-        positions = POSITIONS_6MAX
-    else:
-        positions = POSITIONS_8MAX
+    positions = get_positions_for_table_size(total_seats)
     
     # Map relative position to actual position
     if relative_pos < len(positions):
@@ -137,6 +167,8 @@ def seats_in_position_order(
     return sorted(active_seats, key=sort_key)
 
 
+# Position classification helpers
+
 def is_position_late(position: Position) -> bool:
     """Check if position is considered late (CO, BTN)."""
     return position in (Position.CO, Position.BTN)
@@ -148,5 +180,87 @@ def is_position_blind(position: Position) -> bool:
 
 
 def is_position_early(position: Position) -> bool:
-    """Check if position is early (UTG, UTG+1)."""
-    return position in (Position.UTG, Position.UTG1)
+    """Check if position is early (UTG, UTG+1, UTG+2)."""
+    return position in (Position.UTG, Position.UTG1, Position.UTG2)
+
+
+def is_position_middle(position: Position) -> bool:
+    """Check if position is middle (LJ, HJ)."""
+    return position in (Position.LJ, Position.HJ)
+
+
+# Preflop action order (first to act -> last to act)
+PREFLOP_ACTION_ORDER = [
+    Position.UTG,
+    Position.UTG1,
+    Position.UTG2,
+    Position.LJ,
+    Position.HJ,
+    Position.CO,
+    Position.BTN,
+    Position.SB,
+    Position.BB,
+]
+
+
+def get_preflop_action_index(position: Position) -> int:
+    """
+    Get position's index in preflop action order.
+    
+    Returns:
+        0 for UTG (first), 8 for BB (last), -1 if unknown
+    """
+    try:
+        return PREFLOP_ACTION_ORDER.index(position)
+    except ValueError:
+        return -1
+
+
+def is_before_hero(
+    villain_position: Position,
+    hero_position: Position
+) -> bool:
+    """
+    Check if villain acts before hero in preflop action.
+    
+    Args:
+        villain_position: Villain's position
+        hero_position: Hero's position
+    
+    Returns:
+        True if villain acts before hero
+    """
+    villain_idx = get_preflop_action_index(villain_position)
+    hero_idx = get_preflop_action_index(hero_position)
+    
+    if villain_idx < 0 or hero_idx < 0:
+        return False
+    
+    return villain_idx < hero_idx
+
+
+def position_to_range_key(position: Position) -> Optional[str]:
+    """
+    Convert Position enum to range lookup key (for preflop_ranges).
+    
+    Args:
+        position: Position enum
+    
+    Returns:
+        String key like "UTG+1", "LJ", etc.
+    """
+    mapping = {
+        Position.BTN: "BTN",
+        Position.SB: "SB",
+        Position.BB: "BB",
+        Position.UTG: "UTG",
+        Position.UTG1: "UTG+1",
+        Position.UTG2: "UTG+2",
+        Position.LJ: "LJ",
+        Position.HJ: "HJ",
+        Position.CO: "CO",
+        # Legacy
+        Position.MP: "UTG+2",
+        Position.MP1: "LJ",
+    }
+    return mapping.get(position)

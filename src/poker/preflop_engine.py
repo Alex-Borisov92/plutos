@@ -135,8 +135,8 @@ class RangesBasedEngine(PreflopEngine):
     
     Handles:
     - RFI (open raises)
-    - Defense vs open (3bet/call)
-    - Defense vs 3bet (4bet/call)
+    - Defense vs open (3bet/call) - disabled in rfi_only_mode
+    - Defense vs 3bet (4bet/call) - disabled in rfi_only_mode
     - ICM push/fold for short stacks
     """
     
@@ -145,15 +145,22 @@ class RangesBasedEngine(PreflopEngine):
     DEFAULT_3BET_SIZE = 3.0  # Multiplier of open
     DEFAULT_4BET_SIZE = 2.5  # Multiplier of 3bet
     
-    def __init__(self, min_stack_for_ranges: float = 10.0):
+    def __init__(
+        self,
+        min_stack_for_ranges: float = 10.0,
+        rfi_only_mode: bool = True
+    ):
         """
         Initialize engine.
         
         Args:
             min_stack_for_ranges: Minimum stack (bb) to use open/defense ranges.
                                   Below this, use push/fold.
+            rfi_only_mode: If True, only show recommendations for RFI spots
+                          (when no one has acted before us).
         """
         self.min_stack_for_ranges = min_stack_for_ranges
+        self.rfi_only_mode = rfi_only_mode
     
     def get_decision(self, observation: Observation) -> Optional[PreflopDecision]:
         """Get preflop decision based on ranges."""
@@ -194,11 +201,20 @@ class RangesBasedEngine(PreflopEngine):
         elif context.situation == ActionSituation.RFI:
             return self._handle_rfi(hand, context)
         elif context.situation == ActionSituation.FACING_OPEN:
+            # In RFI-only mode, don't show recommendations when facing action
+            if self.rfi_only_mode:
+                logger.debug("RFI-only mode: skipping facing open")
+                return None
             return self._handle_facing_open(hand, context)
         elif context.situation == ActionSituation.FACING_3BET:
+            if self.rfi_only_mode:
+                logger.debug("RFI-only mode: skipping facing 3bet")
+                return None
             return self._handle_facing_3bet(hand, context)
         else:
             logger.debug(f"Unhandled situation: {context.situation}")
+            if self.rfi_only_mode:
+                return None
             return self._default_fold(hand, context)
     
     def _analyze_context(
