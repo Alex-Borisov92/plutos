@@ -241,10 +241,86 @@ class TestRecognizerIntegration:
         recognizer = CardRecognizer()
         assert recognizer is not None
     
-    def test_load_templates_without_files(self):
-        """Test loading templates when files don't exist."""
+    def test_recognize_suit_by_color(self):
+        """Test suit recognition by color."""
         recognizer = CardRecognizer()
-        # This should not raise, just return False
-        result = recognizer.load_templates()
-        # May be True or False depending on template files
-        assert isinstance(result, bool)
+        
+        # Red = hearts
+        suit, conf = recognizer.recognize_suit_by_color((200, 50, 50))
+        assert suit == "h"
+        assert conf == 1.0
+        
+        # Green = clubs (Pokerdom)
+        suit, conf = recognizer.recognize_suit_by_color((50, 150, 50))
+        assert suit == "c"
+        
+        # Blue = diamonds
+        suit, conf = recognizer.recognize_suit_by_color((50, 50, 150))
+        assert suit == "d"
+        
+        # Dark = spades
+        suit, conf = recognizer.recognize_suit_by_color((30, 30, 30))
+        assert suit == "s"
+
+
+class TestVoting:
+    """Tests for OCR voting mechanism."""
+    
+    def test_vote_for_result_simple_majority(self):
+        """Test voting with clear majority."""
+        from src.vision.card_recognition import vote_for_result
+        
+        samples = ["A", "A", "A", "K", "K", "A", "A", "Q", "A"]
+        result = vote_for_result(samples)
+        assert result == "A"
+    
+    def test_vote_for_result_with_nones(self):
+        """Test voting ignores None values."""
+        from src.vision.card_recognition import vote_for_result
+        
+        samples = [None, "K", None, "K", "K", None, "Q", "K", None]
+        result = vote_for_result(samples)
+        assert result == "K"
+    
+    def test_vote_for_result_all_none(self):
+        """Test voting returns None when all samples are None."""
+        from src.vision.card_recognition import vote_for_result
+        
+        samples = [None, None, None, None, None]
+        result = vote_for_result(samples)
+        assert result is None
+    
+    def test_vote_for_result_single_valid(self):
+        """Test voting with single valid sample."""
+        from src.vision.card_recognition import vote_for_result
+        
+        samples = [None, None, "J", None, None]
+        result = vote_for_result(samples)
+        assert result == "J"
+    
+    def test_vote_for_result_tie_picks_first(self):
+        """Test voting returns most common (first in count order on tie)."""
+        from src.vision.card_recognition import vote_for_result
+        
+        # 3 of each - Counter returns in insertion order for ties
+        samples = ["A", "K", "A", "K", "A", "K"]
+        result = vote_for_result(samples)
+        # Should be A or K (both have 3 votes)
+        assert result in ("A", "K")
+    
+    def test_ocr_cache_clear(self):
+        """Test OCR cache clearing."""
+        from src.vision.card_recognition import OCRCache
+        
+        cache = OCRCache()
+        cache.hero_card1_rank = "A"
+        cache.hero_card2_rank = "K"
+        cache.mark_voted("hero_card1_rank")
+        
+        assert cache.is_voted("hero_card1_rank")
+        
+        cache.clear()
+        
+        assert cache.hero_card1_rank is None
+        assert cache.hero_card2_rank is None
+        assert not cache.is_voted("hero_card1_rank")

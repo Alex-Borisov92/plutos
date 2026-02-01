@@ -83,9 +83,9 @@ class TestCalibrationPersistence:
         config = TableConfig(
             hero_seat_index=4,
             hero_card1_number=Region(100, 200, 30, 40),
-            hero_card1_suit=Region(100, 250, 20, 25),
+            hero_card1_suit_pixel=PixelCoord(100, 250),
             hero_card2_number=Region(140, 200, 30, 40),
-            hero_card2_suit=Region(140, 250, 20, 25),
+            hero_card2_suit_pixel=PixelCoord(140, 250),
             dealer_pixels=[
                 PixelCoord(50, 50),
                 PixelCoord(100, 50),

@@ -2,14 +2,17 @@
 Card recognition using Tesseract OCR and color-based suit detection.
 
 Handles card detection, validation, and deduplication.
-- Rank recognition: Tesseract OCR
+- Rank recognition: Tesseract OCR with voting (9 samples)
 - Suit recognition: Color-based pixel detection (fast and reliable)
+- Caching: Values are cached until new hand detected
 """
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 import logging
 import re
+import time
 
 import numpy as np
 from PIL import Image
@@ -40,6 +43,87 @@ class RecognitionResult:
     raw_suit: str
     is_valid: bool
     error: Optional[str] = None
+
+
+# Default number of OCR samples for voting
+DEFAULT_VOTE_SAMPLES = 9
+
+
+T = TypeVar('T')
+
+
+def vote_for_result(samples: List[T]) -> Optional[T]:
+    """
+    Select most common result from samples (voting).
+    
+    Args:
+        samples: List of OCR results (can include None)
+    
+    Returns:
+        Most common non-None value, or None if no valid samples
+    """
+    # Filter out None values
+    valid = [s for s in samples if s is not None]
+    
+    if not valid:
+        return None
+    
+    # Count occurrences
+    counter = Counter(valid)
+    
+    # Get most common
+    most_common, count = counter.most_common(1)[0]
+    
+    logger.debug(f"Voting result: {most_common} ({count}/{len(samples)} votes)")
+    
+    return most_common
+
+
+@dataclass
+class OCRCache:
+    """
+    Cache for OCR results that persists until new hand.
+    
+    Uses voting from 9 samples to determine value,
+    then caches until hand_id changes.
+    """
+    hero_card1_rank: Optional[str] = None
+    hero_card2_rank: Optional[str] = None
+    hero_card1_suit: Optional[str] = None
+    hero_card2_suit: Optional[str] = None
+    hero_stack: Optional[float] = None
+    pot_size: Optional[float] = None
+    board_ranks: Dict[int, str] = field(default_factory=dict)
+    board_suits: Dict[int, str] = field(default_factory=dict)
+    player_stacks: Dict[int, float] = field(default_factory=dict)
+    
+    # Track which values have been voted on
+    _voted: Dict[str, bool] = field(default_factory=dict)
+    
+    # Hand identifier to detect new hand
+    hand_id: Optional[str] = None
+    
+    def is_voted(self, key: str) -> bool:
+        """Check if value was determined by voting."""
+        return self._voted.get(key, False)
+    
+    def mark_voted(self, key: str):
+        """Mark value as determined by voting."""
+        self._voted[key] = True
+    
+    def clear(self):
+        """Clear all cached values for new hand."""
+        self.hero_card1_rank = None
+        self.hero_card2_rank = None
+        self.hero_card1_suit = None
+        self.hero_card2_suit = None
+        self.hero_stack = None
+        self.pot_size = None
+        self.board_ranks.clear()
+        self.board_suits.clear()
+        self.player_stacks.clear()
+        self._voted.clear()
+        self.hand_id = None
 
 
 class CardRecognizer:
@@ -129,6 +213,42 @@ class CardRecognizer:
         except Exception as e:
             logger.debug(f"OCR error: {e}")
             return None, 0.0
+    
+    def recognize_rank_ocr_voted(
+        self,
+        image: Image.Image,
+        num_samples: int = DEFAULT_VOTE_SAMPLES
+    ) -> Tuple[Optional[str], float]:
+        """
+        Recognize card rank using voting from multiple OCR samples.
+        
+        Takes num_samples readings and returns the most common result.
+        
+        Args:
+            image: PIL Image of the rank portion
+            num_samples: Number of samples to take (default 9)
+        
+        Returns:
+            (rank, confidence) or (None, 0.0)
+        """
+        samples = []
+        
+        for i in range(num_samples):
+            rank, _ = self.recognize_rank_ocr(image)
+            samples.append(rank)
+        
+        result = vote_for_result(samples)
+        
+        if result is None:
+            return None, 0.0
+        
+        # Confidence based on voting agreement
+        valid_samples = [s for s in samples if s is not None]
+        if valid_samples:
+            agreement = samples.count(result) / len(samples)
+            return result, agreement
+        
+        return None, 0.0
     
     @staticmethod
     def recognize_suit_by_color(rgb: Tuple[int, int, int]) -> Tuple[str, float]:
@@ -224,6 +344,7 @@ class CardRecognizer:
         - "K heart" -> Kh
         - "Ah" -> Ah
         - "10 spade" -> Ts
+        - Unicode: "K♠" -> Ks, "Q♥" -> Qh
         
         Args:
             ui_string: Card string from UI
@@ -234,6 +355,11 @@ class CardRecognizer:
         SUIT_MAP = {
             "spade": "s", "heart": "h", "diamond": "d", "club": "c",
             "spades": "s", "hearts": "h", "diamonds": "d", "clubs": "c",
+            # Unicode symbols
+            "♠": "s", "♤": "s",  # Spade
+            "♥": "h", "♡": "h",  # Heart
+            "♦": "d", "♢": "d",  # Diamond
+            "♣": "c", "♧": "c",  # Club
         }
         
         ui_string = ui_string.strip()
@@ -335,6 +461,41 @@ def recognize_stack_ocr(
         return None
 
 
+def recognize_stack_ocr_voted(
+    image: Image.Image,
+    config: Optional[VisionConfig] = None,
+    num_samples: int = DEFAULT_VOTE_SAMPLES
+) -> Optional[float]:
+    """
+    Recognize player stack using voting from multiple OCR samples.
+    
+    Args:
+        image: PIL Image of stack region
+        config: Vision config
+        num_samples: Number of samples (default 9)
+    
+    Returns:
+        Stack in BB as float, or None if recognition failed
+    """
+    samples = []
+    
+    for _ in range(num_samples):
+        value = recognize_stack_ocr(image, config)
+        # Round to 2 decimal places for consistent voting
+        if value is not None:
+            value = round(value, 2)
+        samples.append(value)
+    
+    result = vote_for_result(samples)
+    
+    if result is not None:
+        valid_samples = [s for s in samples if s is not None]
+        agreement = samples.count(result) / len(samples)
+        logger.debug(f"Stack voted: {result} (agreement: {agreement:.0%})")
+    
+    return result
+
+
 def recognize_pot_ocr(
     image: Image.Image,
     config: Optional[VisionConfig] = None
@@ -391,6 +552,41 @@ def recognize_pot_ocr(
     except Exception as e:
         logger.debug(f"Pot OCR error: {e}")
         return None
+
+
+def recognize_pot_ocr_voted(
+    image: Image.Image,
+    config: Optional[VisionConfig] = None,
+    num_samples: int = DEFAULT_VOTE_SAMPLES
+) -> Optional[float]:
+    """
+    Recognize pot size using voting from multiple OCR samples.
+    
+    Args:
+        image: PIL Image of pot region
+        config: Vision config
+        num_samples: Number of samples (default 9)
+    
+    Returns:
+        Pot in BB as float, or None if recognition failed
+    """
+    samples = []
+    
+    for _ in range(num_samples):
+        value = recognize_pot_ocr(image, config)
+        # Round to 2 decimal places for consistent voting
+        if value is not None:
+            value = round(value, 2)
+        samples.append(value)
+    
+    result = vote_for_result(samples)
+    
+    if result is not None:
+        valid_samples = [s for s in samples if s is not None]
+        agreement = samples.count(result) / len(samples)
+        logger.debug(f"Pot voted: {result} (agreement: {agreement:.0%})")
+    
+    return result
 
 
 def convert_cards_list(

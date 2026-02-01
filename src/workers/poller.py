@@ -37,9 +37,12 @@ class WindowState:
     last_hand_id: Optional[str] = None
     turn_detected_time: float = 0.0  # Time when turn=true was first detected
     cards_recognized: bool = False  # True after cards successfully recognized
-    card_votes: list = None  # List of recognized cards for voting
-    final_cards: object = None  # Final cards after voting
-    final_decision: object = None  # Final decision after voting
+    card_votes: list = None  # List of recognized cards for voting (accumulates over polls)
+    final_cards: object = None  # Final cards after voting (cached until new hand)
+    final_decision: object = None  # Final decision (cached until new hand)
+    
+    # Settings for voting
+    VOTE_SAMPLES_NEEDED: int = 9  # Number of samples before voting
 
 
 class TurnEventCallback:
@@ -275,39 +278,38 @@ class StatePoller:
             state.final_cards = override_cards
         elif time_since_new_hand < 1.0:
             hero_cards = None  # Wait for cards to be dealt
-        elif recognition_window_closed:
-            # Window closed - use final result from voting
+        elif state.final_cards is not None:
+            # Already have final cards from voting - use cached
             hero_cards = state.final_cards
         else:
-            # Recognize cards and accumulate votes
-            recognized = self._recognize_hero_cards(window_offset, table_config)
+            # Recognize cards and accumulate votes (single recognition per poll)
+            recognized = self._recognize_hero_cards_single(window_offset, table_config)
             if recognized:
                 state.card_votes.append(recognized)
+                logger.debug(f"Card vote {len(state.card_votes)}/{state.VOTE_SAMPLES_NEEDED}: {recognized}")
+            
+            # Check if we have enough votes for finalization
+            if len(state.card_votes) >= state.VOTE_SAMPLES_NEEDED:
+                from collections import Counter
+                # Vote on cards (use string representation for hashing)
+                votes = [str(c) for c in state.card_votes]
+                counter = Counter(votes)
+                most_common, count = counter.most_common(1)[0]
+                
+                # Require majority (at least 5 out of 9)
+                if count >= (state.VOTE_SAMPLES_NEEDED // 2 + 1):
+                    # Find the actual HoleCards object
+                    for c in state.card_votes:
+                        if str(c) == most_common:
+                            state.final_cards = c
+                            break
+                    logger.info(f"CARDS FINALIZED by voting ({count}/{len(votes)}): {state.final_cards}")
+                else:
+                    # No clear winner - keep oldest half, accumulate more
+                    logger.debug(f"Voting uncertain: {counter.most_common(3)}, continuing...")
+                    state.card_votes = state.card_votes[-(state.VOTE_SAMPLES_NEEDED // 2):]
+            
             hero_cards = recognized
-        
-        # For early positions (UTG, UTG+1), require minimum 10 votes before finalizing
-        # For other positions, just use turn+3sec timing
-        is_early_position = hero_position in (Position.UTG, Position.UTG1)
-        min_votes_needed = 10 if is_early_position else 0
-        has_min_votes = len(state.card_votes) >= min_votes_needed if state.card_votes else False
-        
-        # When recognition window closes, calculate final result
-        # Early positions: need both time AND minimum votes
-        # Other positions: just time (turn+3sec)
-        can_finalize = recognition_window_closed and (not is_early_position or has_min_votes)
-        
-        if can_finalize and state.final_cards is None and state.card_votes:
-            from collections import Counter
-            # Vote on cards (use string representation for hashing)
-            votes = [str(c) for c in state.card_votes]
-            counter = Counter(votes)
-            most_common, count = counter.most_common(1)[0]
-            # Find the actual HoleCards object
-            for c in state.card_votes:
-                if str(c) == most_common:
-                    state.final_cards = c
-                    break
-            logger.info(f"Final cards by voting ({count}/{len(votes)}): {state.final_cards}")
         
         # Detect board cards
         board_cards = self._recognize_board_cards(window_offset, table_config)
@@ -333,9 +335,9 @@ class StatePoller:
         )
         
         # Get preflop decision using observation
-        # Only show final decision after recognition window closes (voting complete)
+        # Only show final decision after cards are finalized by voting
         decision = None
-        if recognition_window_closed and state.final_cards and self._preflop_engine and stage == Stage.PREFLOP:
+        if state.final_cards and self._preflop_engine and stage == Stage.PREFLOP:
             # Use final cards from voting for decision
             observation_with_final = Observation(
                 timestamp=observation.timestamp,
@@ -359,8 +361,8 @@ class StatePoller:
         
         # Send debug info (always, after decision is known)
         if self._on_debug:
-            # Show current cards during recognition, final cards after window closes
-            display_cards = state.final_cards if recognition_window_closed else hero_cards
+            # Show final cards after voting, or current sample during accumulation
+            display_cards = state.final_cards if state.final_cards else hero_cards
             cards_str = str(display_cards) if display_cards else None
             # Use final_decision if available (persists after turn ends)
             display_decision = decision if decision else state.final_decision
@@ -379,97 +381,75 @@ class StatePoller:
         
         return observation
     
-    def _recognize_hero_cards(
+    def _recognize_hero_cards_single(
         self,
         window_offset: tuple,
-        table_config: Optional[TableConfig] = None,
-        num_samples: int = 7
+        table_config: Optional[TableConfig] = None
     ) -> Optional[HoleCards]:
         """
-        Recognize hero's hole cards with majority voting.
+        Recognize hero's hole cards (single sample for voting accumulation).
+        
+        Called once per poll cycle. Results are accumulated in WindowState.card_votes
+        and finalized through voting after 9 samples.
         
         Args:
             window_offset: Window screen offset
             table_config: Table configuration with card regions
-            num_samples: Number of samples for majority voting
         
         Returns:
             HoleCards or None if recognition failed
         """
-        from collections import Counter
-        import time
-        
         config = table_config or self.table_config
-        votes = []
         
-        for sample_idx in range(num_samples):
-            # Capture rank images
-            card1_rank_img = capture_region(
-                config.hero_card1_number, window_offset
-            )
-            card2_rank_img = capture_region(
-                config.hero_card2_number, window_offset
-            )
-            
-            # Check rank images captured
-            if not all([card1_rank_img, card2_rank_img]):
-                logger.debug(f"Sample {sample_idx}: capture failed")
-                continue
-            
-            logger.debug(f"Sample {sample_idx}: captured card1={card1_rank_img.size} card2={card2_rank_img.size}")
-            
-            # Recognize ranks using OCR
-            rank1, rank1_conf = self._recognizer.recognize_rank_ocr(card1_rank_img)
-            rank2, rank2_conf = self._recognizer.recognize_rank_ocr(card2_rank_img)
-            
-            logger.debug(f"Sample {sample_idx}: rank1={rank1} rank2={rank2}")
-            
-            if not rank1 or not rank2:
-                continue
-            
-            # Recognize suits using color detection (faster and more reliable)
-            suit1_pixel = config.hero_card1_suit_pixel
-            suit2_pixel = config.hero_card2_suit_pixel
-            
-            color1 = capture_pixel(suit1_pixel.left, suit1_pixel.top, window_offset)
-            color2 = capture_pixel(suit2_pixel.left, suit2_pixel.top, window_offset)
-            
-            if not color1 or not color2:
-                continue
-            
-            suit1, _ = self._recognizer.recognize_suit_by_color(color1)
-            suit2, _ = self._recognizer.recognize_suit_by_color(color2)
-            
-            # Build cards
-            try:
-                from ..poker.models import Card
-                card1 = Card(rank=rank1, suit=suit1)
-                card2 = Card(rank=rank2, suit=suit2)
-                
-                if card1 != card2:
-                    # Sort cards by string representation for consistent voting key
-                    cards = tuple(sorted([card1, card2], key=str))
-                    votes.append(cards)
-            except Exception as e:
-                logger.debug(f"Card creation failed: {e}")
-                continue
-            
-            time.sleep(0.02)  # Small delay between samples
+        # Capture rank images
+        card1_rank_img = capture_region(
+            config.hero_card1_number, window_offset
+        )
+        card2_rank_img = capture_region(
+            config.hero_card2_number, window_offset
+        )
         
-        if not votes:
-            logger.debug("Card recognition failed: no valid samples out of %d", num_samples)
+        # Check rank images captured
+        if not all([card1_rank_img, card2_rank_img]):
+            logger.debug("Capture failed for hero cards")
             return None
         
-        # Majority voting
-        counter = Counter(votes)
-        most_common, count = counter.most_common(1)[0]
+        # Recognize ranks using OCR
+        rank1, _ = self._recognizer.recognize_rank_ocr(card1_rank_img)
+        rank2, _ = self._recognizer.recognize_rank_ocr(card2_rank_img)
         
-        # Require majority votes (at least 4 out of 7)
-        if count < (num_samples // 2 + 1):
-            logger.debug(f"Card recognition uncertain: {counter}")
+        if not rank1 or not rank2:
+            logger.debug(f"OCR failed: rank1={rank1} rank2={rank2}")
             return None
         
-        return HoleCards(card1=most_common[0], card2=most_common[1])
+        # Recognize suits using color detection (faster and more reliable)
+        suit1_pixel = config.hero_card1_suit_pixel
+        suit2_pixel = config.hero_card2_suit_pixel
+        
+        color1 = capture_pixel(suit1_pixel.left, suit1_pixel.top, window_offset)
+        color2 = capture_pixel(suit2_pixel.left, suit2_pixel.top, window_offset)
+        
+        if not color1 or not color2:
+            logger.debug("Suit pixel capture failed")
+            return None
+        
+        suit1, _ = self._recognizer.recognize_suit_by_color(color1)
+        suit2, _ = self._recognizer.recognize_suit_by_color(color2)
+        
+        # Build cards
+        try:
+            from ..poker.models import Card
+            card1 = Card(rank=rank1, suit=suit1)
+            card2 = Card(rank=rank2, suit=suit2)
+            
+            if card1 == card2:
+                logger.debug(f"Duplicate cards detected: {card1}")
+                return None
+            
+            return HoleCards(card1=card1, card2=card2)
+        except Exception as e:
+            logger.debug(f"Card creation failed: {e}")
+            return None
     
     def _recognize_board_cards(
         self,

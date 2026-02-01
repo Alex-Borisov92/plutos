@@ -204,11 +204,9 @@ def save_calibration(config: TableConfig, path: Path) -> bool:
                 "width": config.hero_card1_number.width,
                 "height": config.hero_card1_number.height,
             },
-            "hero_card1_suit": {
-                "left": config.hero_card1_suit.left,
-                "top": config.hero_card1_suit.top,
-                "width": config.hero_card1_suit.width,
-                "height": config.hero_card1_suit.height,
+            "hero_card1_suit_pixel": {
+                "left": config.hero_card1_suit_pixel.left,
+                "top": config.hero_card1_suit_pixel.top,
             },
             "hero_card2_number": {
                 "left": config.hero_card2_number.left,
@@ -216,11 +214,9 @@ def save_calibration(config: TableConfig, path: Path) -> bool:
                 "width": config.hero_card2_number.width,
                 "height": config.hero_card2_number.height,
             },
-            "hero_card2_suit": {
-                "left": config.hero_card2_suit.left,
-                "top": config.hero_card2_suit.top,
-                "width": config.hero_card2_suit.width,
-                "height": config.hero_card2_suit.height,
+            "hero_card2_suit_pixel": {
+                "left": config.hero_card2_suit_pixel.left,
+                "top": config.hero_card2_suit_pixel.top,
             },
             "dealer_pixels": [
                 {"left": p.left, "top": p.top}
@@ -271,12 +267,15 @@ def load_calibration(path: Path) -> Optional[TableConfig]:
         def region_from_dict(d: dict) -> Region:
             return Region(d['left'], d['top'], d['width'], d['height'])
         
+        def pixel_coord_from_dict(d: dict) -> PixelCoord:
+            return PixelCoord(d['left'], d['top'])
+        
         config = TableConfig(
             hero_seat_index=data.get('hero_seat_index', 4),
             hero_card1_number=region_from_dict(data['hero_card1_number']),
-            hero_card1_suit=region_from_dict(data['hero_card1_suit']),
+            hero_card1_suit_pixel=pixel_coord_from_dict(data['hero_card1_suit_pixel']),
             hero_card2_number=region_from_dict(data['hero_card2_number']),
-            hero_card2_suit=region_from_dict(data['hero_card2_suit']),
+            hero_card2_suit_pixel=pixel_coord_from_dict(data['hero_card2_suit_pixel']),
             dealer_pixels=[
                 PixelCoord(p['left'], p['top'])
                 for p in data.get('dealer_pixels', [])
