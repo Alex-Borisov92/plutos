@@ -108,7 +108,7 @@ class TableConfig:
         Region(823, 513, 32, 43),   # Card 2
         Region(919, 514, 35, 40),   # Card 3
         Region(1109, 512, 38, 45),  # Card 4
-        Region(1015, 512, 35, 45),  # Card 5 - TODO: calibrate exact position
+        Region(1110, 513, 36, 40),  # Card 5
     ])
     
     # Board cards - suit pixels for color-based detection
@@ -118,7 +118,7 @@ class TableConfig:
         PixelCoord(827, 578),   # Card 2
         PixelCoord(925, 576),   # Card 3
         PixelCoord(1116, 581),  # Card 4
-        PixelCoord(1020, 578),  # Card 5 - TODO: calibrate
+        PixelCoord(1117, 575),  # Card 5
     ])
     
     # Dealer button pixel checks (one per seat, 9 max)
@@ -155,7 +155,7 @@ class TableConfig:
         Region(1299, 935, 120, 22),  # Seat 3
         Region(894, 985, 129, 28),   # Seat 4 (hero)
         Region(499, 931, 112, 31),   # Seat 5
-        Region(350, 638, 110, 28),   # Seat 6 - TODO: calibrate
+        Region(337, 642, 115, 27),   # Seat 6
         Region(523, 365, 102, 30),   # Seat 7
     ])
     
