@@ -331,6 +331,64 @@ def recognize_stack_ocr(
         return None
 
 
+def recognize_pot_ocr(
+    image: Image.Image,
+    config: Optional[VisionConfig] = None
+) -> Optional[float]:
+    """
+    Recognize pot size from image using OCR.
+    
+    Expects format like "Банк: 2,35 ББ" - extracts the number.
+    
+    Args:
+        image: PIL Image of pot region
+        config: Vision config
+    
+    Returns:
+        Pot in BB as float, or None if recognition failed
+    """
+    if not TESSERACT_AVAILABLE:
+        return None
+    
+    config = config or VisionConfig()
+    
+    try:
+        # Preprocess
+        img = image.convert('L')
+        img_array = np.array(img)
+        
+        # Threshold
+        img_array = np.where(img_array > 100, 255, 0).astype(np.uint8)
+        img_processed = Image.fromarray(img_array)
+        
+        # OCR - allow cyrillic and numbers
+        ocr_config = "--psm 7"
+        text = pytesseract.image_to_string(
+            img_processed,
+            config=ocr_config,
+            lang="rus+eng"
+        )
+        text = text.strip()
+        
+        if not text:
+            return None
+        
+        logger.debug(f"Pot OCR raw: '{text}'")
+        
+        # Extract number from text like "Банк: 2,35 ББ"
+        # Find pattern: digits with comma/dot separator
+        match = re.search(r'(\d+[,.]?\d*)', text)
+        if match:
+            number_str = match.group(1).replace(',', '.')
+            return float(number_str)
+        
+        return None
+        
+    except Exception as e:
+        logger.debug(f"Pot OCR error: {e}")
+        return None
+
+
 def convert_cards_list(
     card_strings: List[str],
     deduplicate: bool = True

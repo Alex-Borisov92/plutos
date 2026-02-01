@@ -167,8 +167,8 @@ class TableConfig:
     turn_indicator_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(705, 1070))
     turn_indicator_color_range: tuple = (70, 100)  # R channel range when active (green has low R)
     
-    # Pot region for OCR
-    pot_region: Region = field(default_factory=lambda: Region(850, 380, 150, 35))  # TODO: calibrate
+    # Pot region for OCR (format: "Банк: 2,35 ББ")
+    pot_region: Region = field(default_factory=lambda: Region(837, 463, 211, 36))
     
     # Hand ID region for detecting new hands
     hand_id_region: Region = field(default_factory=lambda: Region(418, 6, 101, 10))
