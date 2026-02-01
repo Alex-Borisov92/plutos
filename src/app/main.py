@@ -132,7 +132,8 @@ class PlutosApp:
         hero_cards = debug_info.get("hero_cards", "")
         decision = debug_info.get("decision", "")
         hero_stack = debug_info.get("hero_stack_bb")
-        cards_text = f"[{hero_cards}]" if hero_cards else ""
+        # Only show cards when it's our turn (or we have a final decision)
+        cards_text = f"[{hero_cards}]" if (is_turn or decision) and hero_cards else ""
         decision_text = f" -> {decision}" if decision else ""
         stack_text = f" S:{hero_stack:.1f}BB" if hero_stack else ""
         
@@ -197,6 +198,35 @@ class PlutosApp:
             for table_window in discovered:
                 self._setup_single_window(table_window)
     
+    def _on_cards_override(self, window_id: str, cards_str: str):
+        """
+        Handle manual card override from overlay input.
+        
+        Args:
+            window_id: Window ID
+            cards_str: Cards string like "KsQh"
+        """
+        logger.info(f"[{window_id}] Manual cards override: {cards_str}")
+        
+        # Pass to poller for processing
+        if self._poller:
+            self._poller.set_card_override(window_id, cards_str)
+    
+    def _on_action_override(self, window_id: str, action: str):
+        """
+        Handle manual action override from overlay button.
+        
+        Args:
+            window_id: Window ID
+            action: "fold" or "raise"
+        """
+        logger.info(f"[{window_id}] Manual action override: {action.upper()}")
+        
+        # Update overlay to show the overridden action
+        overlay = self._overlays.get(window_id)
+        if overlay:
+            overlay.update_text(f"OVERRIDE\n{action.upper()}")
+    
     def _setup_single_window(self, table_window: TableWindow):
         """
         Setup a single table window with overlay and DB registration.
@@ -208,8 +238,13 @@ class PlutosApp:
         x = table_window.info.client_left + self.config.overlay.offset_x
         y = table_window.info.client_top + self.config.overlay.offset_y
         
-        # Create Qt overlay
-        overlay = QtOverlayWindow(table_window.window_id, self.config.overlay)
+        # Create Qt overlay with override callbacks
+        overlay = QtOverlayWindow(
+            table_window.window_id, 
+            self.config.overlay,
+            on_cards_override=self._on_cards_override,
+            on_action_override=self._on_action_override
+        )
         overlay.start(x, y)
         overlay.show_waiting()
         self._overlays[table_window.window_id] = overlay

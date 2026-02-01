@@ -122,14 +122,12 @@ class UIStateDetector:
                        abs(r - g) < 15 and abs(g - b) < 15)
             
             if is_gray:
-                logger.debug(f"Dealer found at S{seat_idx}: {color}")
                 return DealerDetectionResult(
                     seat_index=seat_idx,
                     pixel_color=color,
                     confidence=1.0
                 )
         
-        logger.debug(f"Dealer colors: {' '.join(debug_colors)}")
         return DealerDetectionResult(
             seat_index=None,
             pixel_color=None,

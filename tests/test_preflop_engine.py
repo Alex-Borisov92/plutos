@@ -215,9 +215,10 @@ class TestEngineFactory:
         assert isinstance(engine, PlaceholderPreflopEngine)
     
     def test_create_default_engine(self):
-        """Test default engine type."""
+        """Test default engine type - now uses RangesBasedEngine."""
+        from src.poker.preflop_engine import RangesBasedEngine
         engine = create_engine()
-        assert isinstance(engine, PlaceholderPreflopEngine)
+        assert isinstance(engine, RangesBasedEngine)
     
     def test_create_chart_engine(self):
         """Test creating chart engine (falls back to placeholder)."""

@@ -34,10 +34,13 @@ class Position(Enum):
     BB = "BB"
     UTG = "UTG"
     UTG1 = "UTG+1"
-    MP = "MP"
-    MP1 = "MP+1"
+    UTG2 = "UTG+2"
+    LJ = "LJ"
     HJ = "HJ"
     CO = "CO"
+    # Legacy aliases (kept for backwards compatibility)
+    MP = "MP"        # Maps to UTG+2 in 9max
+    MP1 = "MP+1"     # Maps to LJ in 9max
     UNKNOWN = "UNKNOWN"
 
 

@@ -109,12 +109,61 @@ class StatePoller:
         
         # Debounce settings
         self._debounce_signals = 1  # Number of consecutive signals needed (instant)
+        
+        # Manual card overrides: {window_id: "KsQh"}
+        self._card_overrides: Dict[str, str] = {}
     
     def _get_or_create_state(self, window_id: str) -> WindowState:
         """Get or create window state."""
         if window_id not in self._window_states:
             self._window_states[window_id] = WindowState(window_id=window_id)
         return self._window_states[window_id]
+    
+    def set_card_override(self, window_id: str, cards_str: str):
+        """
+        Set manual card override for a window.
+        
+        Args:
+            window_id: Window ID
+            cards_str: Cards string like "KsQh" or "AsKd"
+        """
+        # Parse cards string into HoleCards
+        from ..poker.models import Card
+        
+        cards_str = cards_str.strip().upper()
+        if len(cards_str) < 4:
+            logger.warning(f"Invalid cards override: {cards_str}")
+            return
+        
+        # Extract two cards (each is 2 chars: rank + suit)
+        try:
+            # Handle formats like "KsQh" or "Ks Qh"
+            cards_str = cards_str.replace(" ", "")
+            card1_str = cards_str[:2].upper()
+            card2_str = cards_str[2:4].upper()
+            
+            # Lowercase suit
+            card1_str = card1_str[0] + card1_str[1].lower()
+            card2_str = card2_str[0] + card2_str[1].lower()
+            
+            card1 = Card(rank=card1_str[0], suit=card1_str[1])
+            card2 = Card(rank=card2_str[0], suit=card2_str[1])
+            
+            hole_cards = HoleCards(card1=card1, card2=card2)
+            
+            # Store override
+            with self._lock:
+                self._card_overrides[window_id] = hole_cards
+            
+            logger.info(f"[{window_id}] Card override set: {hole_cards}")
+            
+            # Also update state's final cards
+            state = self._get_or_create_state(window_id)
+            state.final_cards = hole_cards
+            state.final_decision = None  # Will recalculate
+            
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Failed to parse cards override '{cards_str}': {e}")
     
     def _poll_window(self, window: RegisteredWindow) -> Optional[Observation]:
         """
@@ -200,10 +249,19 @@ class StatePoller:
             state.card_votes = []  # Reset voting
             state.final_cards = None
             state.final_decision = None
+            # Clear manual override on new hand
+            with self._lock:
+                if window_id in self._card_overrides:
+                    del self._card_overrides[window_id]
+            state.final_decision = None
         
         # Initialize card_votes if None
         if state.card_votes is None:
             state.card_votes = []
+        
+        # Check for manual card override first
+        with self._lock:
+            override_cards = self._card_overrides.get(window_id)
         
         # Decide whether to recognize cards
         # Logic: recognize cards until turn=true + 3 seconds, then use final result
@@ -211,7 +269,11 @@ class StatePoller:
         time_since_turn = current_time - state.turn_detected_time if state.turn_detected_time > 0 else 0
         recognition_window_closed = state.turn_detected_time > 0 and time_since_turn > 3.0
         
-        if time_since_new_hand < 1.0:
+        if override_cards:
+            # Use manual override
+            hero_cards = override_cards
+            state.final_cards = override_cards
+        elif time_since_new_hand < 1.0:
             hero_cards = None  # Wait for cards to be dealt
         elif recognition_window_closed:
             # Window closed - use final result from voting
@@ -223,14 +285,16 @@ class StatePoller:
                 state.card_votes.append(recognized)
             hero_cards = recognized
         
-        # Determine minimum votes needed based on position
-        # Early positions (UTG, UTG+1) need more samples for reliability
-        min_votes_for_position = 10 if hero_position in (Position.UTG, Position.UTG1) else 5
+        # For early positions (UTG, UTG+1), require minimum 10 votes before finalizing
+        # For other positions, just use turn+3sec timing
+        is_early_position = hero_position in (Position.UTG, Position.UTG1)
+        min_votes_needed = 10 if is_early_position else 0
+        has_min_votes = len(state.card_votes) >= min_votes_needed if state.card_votes else False
         
         # When recognition window closes, calculate final result
-        # But ensure we have minimum votes for early positions
-        has_enough_votes = len(state.card_votes) >= min_votes_for_position if state.card_votes else False
-        can_finalize = recognition_window_closed or has_enough_votes
+        # Early positions: need both time AND minimum votes
+        # Other positions: just time (turn+3sec)
+        can_finalize = recognition_window_closed and (not is_early_position or has_min_votes)
         
         if can_finalize and state.final_cards is None and state.card_votes:
             from collections import Counter
