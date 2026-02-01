@@ -57,8 +57,8 @@ class PollerConfig:
 @dataclass
 class OverlayConfig:
     """Configuration for the overlay window."""
-    offset_x: int = 800   # Offset from window left edge
-    offset_y: int = 900   # Offset from window top edge
+    offset_x: int = 1560  # Offset from window left edge
+    offset_y: int = 1008  # Offset from window top edge
     width: int = 224
     height: int = 96
     font_size: int = 10

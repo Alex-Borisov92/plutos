@@ -103,9 +103,9 @@ class StatePoller:
         self._capture = ScreenCapture()
         self._recognizer = CardRecognizer()
         
-        # Preflop decision engine
-        from ..poker.preflop_engine import OpeningRangesEngine
-        self._preflop_engine = OpeningRangesEngine()
+        # Preflop decision engine (RFI-only mode by default)
+        from ..poker.preflop_engine import RangesBasedEngine
+        self._preflop_engine = RangesBasedEngine(rfi_only_mode=True)
         
         # Debounce settings
         self._debounce_signals = 1  # Number of consecutive signals needed (instant)
@@ -413,9 +413,9 @@ class StatePoller:
             if not all([card1_rank_img, card2_rank_img]):
                 continue
             
-            # Recognize ranks using template matching
-            rank1, rank1_conf = self._recognizer.recognize_rank(card1_rank_img)
-            rank2, rank2_conf = self._recognizer.recognize_rank(card2_rank_img)
+            # Recognize ranks using OCR
+            rank1, rank1_conf = self._recognizer.recognize_rank_ocr(card1_rank_img)
+            rank2, rank2_conf = self._recognizer.recognize_rank_ocr(card2_rank_img)
             
             if not rank1 or not rank2:
                 continue
@@ -621,8 +621,7 @@ class StatePoller:
             logger.warning("Poller already running")
             return
         
-        # Load templates for card recognition
-        self._recognizer.load_templates()
+        # OCR-based recognition - no templates needed
         
         self._running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
