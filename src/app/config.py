@@ -94,12 +94,12 @@ class TableConfig:
     """
     
     # Hero cards - number regions for Tesseract OCR
-    hero_card1_number: Region = field(default_factory=lambda: Region(871, 824, 30, 43))
-    hero_card2_number: Region = field(default_factory=lambda: Region(968, 827, 27, 37))
+    hero_card1_number: Region = field(default_factory=lambda: Region(870, 823, 35, 45))
+    hero_card2_number: Region = field(default_factory=lambda: Region(967, 824, 32, 42))
     
     # Hero cards - suit pixel for color-based detection
-    hero_card1_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(876, 891))
-    hero_card2_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(973, 888))
+    hero_card1_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(878, 888))
+    hero_card2_suit_pixel: PixelCoord = field(default_factory=lambda: PixelCoord(973, 891))
     
     # Board cards - number regions for Tesseract OCR (5 cards)
     # Card 5 placeholder - needs calibration
@@ -121,17 +121,18 @@ class TableConfig:
         PixelCoord(1117, 575),  # Card 5
     ])
     
-    # Dealer button pixel checks (one per seat, 9 max)
+    # Dealer button pixel checks (one per seat, 8 max)
     # Seat order: 0=top-center, going clockwise
+    # Hero is at seat 4 (bottom center)
     dealer_pixels: List[PixelCoord] = field(default_factory=lambda: [
-        PixelCoord(839, 344),   # Seat 0
-        PixelCoord(1216, 347),  # Seat 1
-        PixelCoord(1423, 458),  # Seat 2
-        PixelCoord(1320, 717),  # Seat 3
-        PixelCoord(1054, 784),  # Seat 4 (hero)
-        PixelCoord(590, 718),   # Seat 5
-        PixelCoord(488, 458),   # Seat 6
-        PixelCoord(695, 345),   # Seat 7
+        PixelCoord(838, 343),   # Seat 0 - top center
+        PixelCoord(1216, 347),  # Seat 1 - top right (TODO: recalibrate)
+        PixelCoord(1423, 459),  # Seat 2 - right upper
+        PixelCoord(1320, 717),  # Seat 3 - right lower (TODO: recalibrate)
+        PixelCoord(1054, 784),  # Seat 4 - hero (bottom center)
+        PixelCoord(590, 718),   # Seat 5 - left lower (TODO: recalibrate)
+        PixelCoord(488, 460),   # Seat 6 - left
+        PixelCoord(695, 345),   # Seat 7 - top left (TODO: recalibrate)
     ])
     
     # Active player pixel checks (card back presence)

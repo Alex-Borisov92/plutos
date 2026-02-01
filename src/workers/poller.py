@@ -362,7 +362,9 @@ class StatePoller:
             # Show current cards during recognition, final cards after window closes
             display_cards = state.final_cards if recognition_window_closed else hero_cards
             cards_str = str(display_cards) if display_cards else None
-            decision_str = decision.action.value if decision else None
+            # Use final_decision if available (persists after turn ends)
+            display_decision = decision if decision else state.final_decision
+            decision_str = display_decision.action.value if display_decision else None
             self._on_debug(window_id, {
                 "dealer_seat": dealer_result.seat_index,
                 "active_count": active_result.count,
@@ -400,7 +402,7 @@ class StatePoller:
         config = table_config or self.table_config
         votes = []
         
-        for _ in range(num_samples):
+        for sample_idx in range(num_samples):
             # Capture rank images
             card1_rank_img = capture_region(
                 config.hero_card1_number, window_offset
@@ -411,11 +413,16 @@ class StatePoller:
             
             # Check rank images captured
             if not all([card1_rank_img, card2_rank_img]):
+                logger.debug(f"Sample {sample_idx}: capture failed")
                 continue
+            
+            logger.debug(f"Sample {sample_idx}: captured card1={card1_rank_img.size} card2={card2_rank_img.size}")
             
             # Recognize ranks using OCR
             rank1, rank1_conf = self._recognizer.recognize_rank_ocr(card1_rank_img)
             rank2, rank2_conf = self._recognizer.recognize_rank_ocr(card2_rank_img)
+            
+            logger.debug(f"Sample {sample_idx}: rank1={rank1} rank2={rank2}")
             
             if not rank1 or not rank2:
                 continue

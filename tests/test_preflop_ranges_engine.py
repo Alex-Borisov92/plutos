@@ -175,35 +175,41 @@ class TestRFIDecisions:
 # Defense vs Open tests
 # -----------------------------------------------------------------------------
 
+@pytest.fixture
+def full_engine():
+    """Create a RangesBasedEngine with rfi_only_mode=False."""
+    return RangesBasedEngine(rfi_only_mode=False)
+
+
 class TestDefenseVsOpen:
-    """Tests for facing an open raise."""
+    """Tests for facing an open raise (requires rfi_only_mode=False)."""
     
-    def test_co_3bet_vs_utg_with_aq(self, engine):
+    def test_co_3bet_vs_utg_with_aq(self, full_engine):
         """CO should 3bet AQs vs UTG open."""
         obs = make_observation(
             hero_cards=(("A", "s"), ("Q", "s")),  # AQs
             hero_position=Position.CO,
             active_positions=(Position.UTG,),  # UTG opened
         )
-        decision = engine.get_decision(obs)
+        decision = full_engine.get_decision(obs)
         
         assert decision is not None
         assert decision.action == Action.RAISE
         assert "3BET" in decision.reasoning
     
-    def test_btn_call_vs_co_with_88(self, engine):
+    def test_btn_call_vs_co_with_88(self, full_engine):
         """BTN should call with 88 vs CO open."""
         obs = make_observation(
             hero_cards=(("8", "s"), ("8", "h")),  # 88
             hero_position=Position.BTN,
             active_positions=(Position.CO,),  # CO opened
         )
-        decision = engine.get_decision(obs)
+        decision = full_engine.get_decision(obs)
         
         assert decision is not None
         assert decision.action == Action.CALL
     
-    def test_sb_3bet_bluff_vs_btn(self, engine):
+    def test_sb_3bet_bluff_vs_btn(self, full_engine):
         """SB should 3bet bluff wide vs BTN."""
         # A5s is in 3bet bluff range vs BTN
         obs = make_observation(
@@ -211,12 +217,12 @@ class TestDefenseVsOpen:
             hero_position=Position.SB,
             active_positions=(Position.BTN,),
         )
-        decision = engine.get_decision(obs)
+        decision = full_engine.get_decision(obs)
         
         assert decision is not None
         assert decision.action == Action.RAISE
     
-    def test_bb_defend_wide_vs_sb(self, engine):
+    def test_bb_defend_wide_vs_sb(self, full_engine):
         """BB should defend wide vs SB open."""
         # K5o is in BB call range vs SB
         obs = make_observation(
@@ -224,7 +230,7 @@ class TestDefenseVsOpen:
             hero_position=Position.BB,
             active_positions=(Position.SB,),
         )
-        decision = engine.get_decision(obs)
+        decision = full_engine.get_decision(obs)
         
         assert decision is not None
         assert decision.action in (Action.CALL, Action.RAISE)
@@ -403,6 +409,76 @@ class TestFactory:
         from src.poker.preflop_engine import PlaceholderPreflopEngine
         engine = create_engine("placeholder")
         assert isinstance(engine, PlaceholderPreflopEngine)
+    
+    def test_rfi_only_mode_default(self):
+        """RFI-only mode should be True by default."""
+        engine = create_engine("ranges")
+        assert engine.rfi_only_mode is True
+    
+    def test_rfi_only_mode_configurable(self):
+        """RFI-only mode should be configurable."""
+        engine = create_engine("ranges", rfi_only_mode=False)
+        assert engine.rfi_only_mode is False
+
+
+# -----------------------------------------------------------------------------
+# RFI-only mode tests
+# -----------------------------------------------------------------------------
+
+class TestRFIOnlyMode:
+    """Tests for RFI-only mode behavior."""
+    
+    def test_rfi_only_returns_decision_for_rfi(self):
+        """RFI-only mode should return decision when no action before us."""
+        engine = RangesBasedEngine(rfi_only_mode=True)
+        obs = make_observation(
+            hero_cards=(("A", "s"), ("K", "s")),
+            hero_position=Position.CO,
+            active_positions=(),  # No one acted before us - RFI
+        )
+        decision = engine.get_decision(obs)
+        
+        assert decision is not None
+        assert decision.action == Action.RAISE
+    
+    def test_rfi_only_returns_none_facing_open(self):
+        """RFI-only mode should return None when facing an open."""
+        engine = RangesBasedEngine(rfi_only_mode=True)
+        obs = make_observation(
+            hero_cards=(("A", "s"), ("K", "s")),
+            hero_position=Position.CO,
+            active_positions=(Position.UTG,),  # UTG opened
+        )
+        decision = engine.get_decision(obs)
+        
+        # In RFI-only mode, we skip facing open situations
+        assert decision is None
+    
+    def test_full_mode_returns_decision_facing_open(self):
+        """Full mode should return decision when facing an open."""
+        engine = RangesBasedEngine(rfi_only_mode=False)
+        obs = make_observation(
+            hero_cards=(("A", "s"), ("K", "s")),
+            hero_position=Position.CO,
+            active_positions=(Position.UTG,),  # UTG opened
+        )
+        decision = engine.get_decision(obs)
+        
+        assert decision is not None
+        assert decision.action in (Action.RAISE, Action.CALL, Action.FOLD)
+    
+    def test_rfi_only_still_handles_push_fold(self):
+        """RFI-only mode should still handle push/fold situations."""
+        engine = RangesBasedEngine(rfi_only_mode=True)
+        obs = make_observation(
+            hero_cards=(("A", "s"), ("A", "h")),
+            hero_position=Position.UTG,
+            hero_stack_bb=5.0,  # Short stack - push/fold
+        )
+        decision = engine.get_decision(obs)
+        
+        assert decision is not None
+        assert decision.action == Action.ALL_IN
 
 
 # -----------------------------------------------------------------------------

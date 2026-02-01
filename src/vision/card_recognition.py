@@ -107,7 +107,10 @@ class CardRecognizer:
             text = pytesseract.image_to_string(img_processed, config=ocr_config)
             text = text.strip().upper()
             
+            logger.debug(f"OCR raw text: '{text}' (img size: {image.size})")
+            
             if not text:
+                logger.debug("OCR returned empty text")
                 return None, 0.0
             
             # Take first character/token
@@ -117,9 +120,10 @@ class CardRecognizer:
             rank = self.RANK_MAP.get(rank, rank)
             
             if rank in self.VALID_RANKS:
+                logger.debug(f"OCR recognized rank: {rank}")
                 return rank, 0.9
             
-            logger.debug(f"OCR result '{text}' not valid rank")
+            logger.debug(f"OCR result '{text}' -> '{rank}' not valid rank")
             return None, 0.0
             
         except Exception as e:
